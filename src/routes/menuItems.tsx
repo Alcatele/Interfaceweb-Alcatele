@@ -1,4 +1,4 @@
-﻿import {
+import {
   ApartmentOutlined,
   ApiOutlined,
   AudioOutlined,
@@ -22,6 +22,7 @@
   ToolOutlined,
   UsergroupAddOutlined,
   BankOutlined,
+  SendOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { ReactNode } from 'react';
@@ -162,6 +163,12 @@ export const routeItems: RouteItem[] = [
     icon: <MailOutlined />,
   },
   {
+    key: 'whatsapp',
+    label: 'WhatsApp',
+    path: '/whatsapp',
+    icon: <SendOutlined />,
+  },
+  {
     key: 'security-audit',
     label: 'Segurança',
     path: '/seguranca',
@@ -182,4 +189,3 @@ export const menuItems: MenuProps['items'] = routeItems.map((item) => ({
 }));
 
 export const defaultIcon = <AppstoreOutlined />;
-
