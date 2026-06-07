@@ -1,4 +1,4 @@
-﻿import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import ProtectedRoute from '../components/ProtectedRoute';
 import AccessDenied from '../pages/AccessDenied';
@@ -25,6 +25,8 @@ import SipTrunks from '../pages/SipTrunks';
 import Tenants from '../pages/Tenants';
 import Voicemail from '../pages/Voicemail';
 import Webphone from '../pages/Webphone';
+import WhatsAppIntegration from '../pages/WhatsAppIntegration';
+import WhatsAppMessaging from '../pages/WhatsAppMessaging';
 import type { RouteKey } from '../services/accessControl';
 
 function protect(routeKey: RouteKey, element: ReactNode) {
@@ -89,6 +91,14 @@ export default function AppRoutes() {
         element={protect('voicemail', <Voicemail />)}
       />
       <Route
+        path="/whatsapp"
+        element={protect('whatsapp', <WhatsAppIntegration />)}
+      />
+      <Route
+        path="/whatsapp-mensagens"
+        element={protect('whatsapp', <WhatsAppMessaging />)}
+      />
+      <Route
         path="/seguranca"
         element={protect('security-audit', <SecurityAudit />)}
       />
@@ -101,4 +111,3 @@ export default function AppRoutes() {
     </Routes>
   );
 }
-
