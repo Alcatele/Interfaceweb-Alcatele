@@ -1,5 +1,7 @@
 ﻿import {
   BellOutlined,
+  CheckCircleFilled,
+  CustomerServiceOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -95,38 +97,52 @@ export default function MainLayout({
         collapsible
         onBreakpoint={(broken) => setCollapsed(broken)}
         onCollapse={setCollapsed}
-        theme={themeMode}
+        theme="dark"
         trigger={null}
-        width={256}
+        width={264}
       >
-        <div className="brand">
-          <div className="brand-mark">AC</div>
-          <div className="brand-copy">
-            <p className="brand-title">Alcatele Cloud PBX</p>
-            <p className="brand-subtitle">Painel administrativo</p>
+        <div className="sider-inner">
+          <div className="brand">
+            <div className="brand-mark">AC</div>
+            <div className="brand-copy">
+              <p className="brand-title">Alcatele Cloud</p>
+              <p className="brand-subtitle">Unified Communications</p>
+            </div>
           </div>
-        </div>
-        <Menu
-          items={visibleMenuItems}
-          mode="inline"
-          onClick={({ key }) => {
-            const route = routeItems.find((item) => item.key === key);
+          {!collapsed ? <p className="navigation-label">Workspace</p> : null}
+          <Menu
+            className="app-menu"
+            items={visibleMenuItems}
+            mode="inline"
+            onClick={({ key }) => {
+              const route = routeItems.find((item) => item.key === key);
 
-            if (route) {
-              navigate(route.path);
+              if (route) {
+                navigate(route.path);
 
-              if (isMobile) {
-                setCollapsed(true);
+                if (isMobile) {
+                  setCollapsed(true);
+                }
               }
-            }
-          }}
-          selectedKeys={[activeKey]}
-          style={{ borderInlineEnd: 0, paddingBlock: 12 }}
-          theme={themeMode}
-        />
+            }}
+            selectedKeys={[activeKey]}
+            theme="dark"
+          />
+          {!collapsed ? (
+            <div className="sider-status">
+              <span className="sider-status-icon">
+                <CheckCircleFilled />
+              </span>
+              <div>
+                <strong>Serviços operacionais</strong>
+                <span>Ambiente monitorado</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </Sider>
 
-      <Layout>
+      <Layout className="app-main">
         <Header className="topbar">
           <div className="topbar-left">
             <Button
@@ -136,21 +152,34 @@ export default function MainLayout({
               title={collapsed ? 'Expandir menu' : 'Recolher menu'}
               type="text"
             />
-            <Typography.Text strong>{currentRoute?.label}</Typography.Text>
+            <div className="topbar-context">
+              <span>Console UCaaS</span>
+              <Typography.Text strong>{currentRoute?.label}</Typography.Text>
+            </div>
           </div>
 
           <div className="topbar-right">
-            <Select
-              aria-label="Empresa ativa"
-              onChange={(tenantId) => void switchTenant(tenantId)}
-              options={availableTenants.map((tenant) => ({
-                label: tenant.name,
-                value: tenant.id,
-              }))}
-              style={{ minWidth: 210 }}
-              value={activeTenant?.id}
-            />
+            <div className="tenant-control">
+              <span className="tenant-control-icon">
+                <CustomerServiceOutlined />
+              </span>
+              <div>
+                <span className="tenant-label">Empresa ativa</span>
+                <Select
+                  aria-label="Empresa ativa"
+                  bordered={false}
+                  onChange={(tenantId) => void switchTenant(tenantId)}
+                  options={availableTenants.map((tenant) => ({
+                    label: tenant.name,
+                    value: tenant.id,
+                  }))}
+                  popupMatchSelectWidth={260}
+                  value={activeTenant?.id}
+                />
+              </div>
+            </div>
             <Button
+              className="topbar-icon-button"
               aria-label={
                 themeMode === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'
               }
@@ -162,13 +191,14 @@ export default function MainLayout({
             />
             <Badge count={3} size="small">
               <Button
+                className="topbar-icon-button"
                 aria-label="Notificações"
                 icon={<BellOutlined />}
                 title="Notificações"
               />
             </Badge>
-            <Space size={8}>
-              <Avatar icon={<UserOutlined />} />
+            <Space className="user-control" size={9}>
+              <Avatar className="user-avatar" icon={<UserOutlined />} />
               <div className="topbar-user">
                 <Typography.Text strong>{currentUser.name}</Typography.Text>
                 <Typography.Text
@@ -184,6 +214,7 @@ export default function MainLayout({
               <Tooltip title="Sair">
                 <Button
                   aria-label="Sair"
+                  className="user-logout"
                   icon={<LogoutOutlined />}
                   onClick={logout}
                   title="Sair"
@@ -196,7 +227,7 @@ export default function MainLayout({
         <Content className="page-shell">{children}</Content>
         <Footer className="app-footer">
           <Typography.Text type="secondary">
-            Copyright 2026 Alcatele Tecnologia. Todos os direitos reservados.
+            Alcatele Tecnologia · Comunicação empresarial em nuvem
           </Typography.Text>
         </Footer>
       </Layout>

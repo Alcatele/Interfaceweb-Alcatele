@@ -15,7 +15,7 @@ export default function PageHeader({
 }: PageHeaderProps) {
   return (
     <div className="page-header">
-      <div>
+      <div className="page-header-copy">
         {kicker ? <p className="page-kicker">{kicker}</p> : null}
         <h1 className="page-title">{title}</h1>
         {description ? (

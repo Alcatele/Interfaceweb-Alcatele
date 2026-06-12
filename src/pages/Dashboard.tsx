@@ -1,11 +1,24 @@
 import {
   ApiOutlined,
   BranchesOutlined,
+  CheckCircleFilled,
+  CloudServerOutlined,
   PhoneOutlined,
   SyncOutlined,
   TeamOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Card, Col, Row, Space, Spin, Tag, Typography, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Row,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import { useCallback, useEffect, useState } from 'react';
 import MetricCard from '../components/MetricCard';
 import PageHeader from '../components/PageHeader';
@@ -82,16 +95,54 @@ export default function Dashboard() {
           ) : undefined
         }
         kicker="MVP operacional"
-        title="Dashboard"
-        description={`Visão do tenant ${summary.tenant.name}.`}
+        title="Visão geral"
+        description="Acompanhe os principais recursos de comunicação e o estado do ambiente."
       />
+
+      <Card className="dashboard-overview soft-panel">
+        <div className="dashboard-overview-main">
+          <span className="dashboard-overview-icon">
+            <CloudServerOutlined />
+          </span>
+          <div>
+            <span className="dashboard-overview-eyebrow">Workspace ativo</span>
+            <Typography.Title level={3}>{summary.tenant.name}</Typography.Title>
+            <Typography.Text type="secondary">
+              Telefonia, usuários e configurações em um único ambiente.
+            </Typography.Text>
+          </div>
+        </div>
+        <div className="dashboard-overview-meta">
+          <div>
+            <span>Integração FusionPBX</span>
+            <strong
+              className={
+                fusion?.status === 'active' ? 'status-online' : 'status-waiting'
+              }
+            >
+              <CheckCircleFilled />
+              {fusion?.status === 'active'
+                ? 'Conectada'
+                : 'Aguardando configuração'}
+            </strong>
+          </div>
+          <div>
+            <span>Última sincronização</span>
+            <strong>
+              {fusion?.lastSyncAt
+                ? new Date(fusion.lastSyncAt).toLocaleString('pt-BR')
+                : 'Ainda não executada'}
+            </strong>
+          </div>
+        </div>
+      </Card>
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} xl={6}>
           <MetricCard
             icon={<PhoneOutlined />}
-            iconBg="rgba(15, 118, 110, 0.14)"
-            iconColor="#0f766e"
+            iconBg="rgba(59, 111, 245, 0.12)"
+            iconColor="#3b6ff5"
             label="Ramais"
             trend={{
               direction: 'flat',
@@ -104,8 +155,8 @@ export default function Dashboard() {
         <Col xs={24} sm={12} xl={6}>
           <MetricCard
             icon={<ApiOutlined />}
-            iconBg="rgba(37, 99, 235, 0.14)"
-            iconColor="#2563eb"
+            iconBg="rgba(20, 184, 166, 0.12)"
+            iconColor="#0f9f8f"
             label="Troncos"
             trend={{
               direction: 'flat',
@@ -121,8 +172,8 @@ export default function Dashboard() {
         <Col xs={24} sm={12} xl={6}>
           <MetricCard
             icon={<BranchesOutlined />}
-            iconBg="rgba(217, 119, 6, 0.14)"
-            iconColor="#d97706"
+            iconBg="rgba(245, 158, 11, 0.13)"
+            iconColor="#d98b08"
             label="Rotas ativas"
             trend={{ direction: 'flat', tone: 'default', value: 'Entrada + saída' }}
             value={String(metrics.inboundRoutes + metrics.outboundRoutes)}
@@ -131,8 +182,8 @@ export default function Dashboard() {
         <Col xs={24} sm={12} xl={6}>
           <MetricCard
             icon={<TeamOutlined />}
-            iconBg="rgba(124, 58, 237, 0.14)"
-            iconColor="#7c3aed"
+            iconBg="rgba(139, 92, 246, 0.12)"
+            iconColor="#7c4fe0"
             label="Usuários"
             trend={{ direction: 'flat', tone: 'default', value: 'Ativos' }}
             value={String(metrics.usersTotal)}
@@ -142,7 +193,10 @@ export default function Dashboard() {
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} lg={12}>
-          <Card className="soft-panel" title="Integração FusionPBX">
+          <Card
+            className="dashboard-panel soft-panel"
+            title="Integração FusionPBX"
+          >
             <Space direction="vertical" size={12}>
               <Space>
                 <Typography.Text>Status</Typography.Text>
@@ -163,7 +217,10 @@ export default function Dashboard() {
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card className="soft-panel" title="Fila de provisionamento">
+          <Card
+            className="dashboard-panel soft-panel"
+            title="Fila de provisionamento"
+          >
             {metrics.pendingSync > 0 ? (
               <Alert
                 description="Execute a sincronização para aplicar as alterações no FusionPBX."

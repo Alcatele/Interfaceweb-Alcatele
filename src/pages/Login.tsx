@@ -90,21 +90,32 @@ export default function Login() {
         </div>
 
         <div className="login-status">
-          <Typography.Text type="secondary">Ambiente</Typography.Text>
-          <Typography.Title level={2}>PABX Cloud</Typography.Title>
+          <Typography.Text className="login-eyebrow">
+            Comunicação sem limites
+          </Typography.Text>
+          <Typography.Title level={2}>
+            Sua operação de voz em um só lugar.
+          </Typography.Title>
           <Typography.Paragraph>
-            Acesso protegido por conta individual, senha e perfil de permissão.
+            Gerencie empresas, ramais, rotas e chamadas com uma experiência
+            simples, segura e preparada para crescer.
           </Typography.Paragraph>
-          <Space direction="vertical" size={14}>
-            <Space>
+          <div className="login-feature-grid">
+            <div className="login-feature">
               <PhoneOutlined />
-              <Typography.Text>Ramais e WebRTC integrados</Typography.Text>
-            </Space>
-            <Space>
+              <div>
+                <strong>Telefonia integrada</strong>
+                <span>Ramais e WebRTC em nuvem</span>
+              </div>
+            </div>
+            <div className="login-feature">
               <SafetyCertificateOutlined />
-              <Typography.Text>Controle de acesso por funcao</Typography.Text>
-            </Space>
-          </Space>
+              <div>
+                <strong>Acesso protegido</strong>
+                <span>Permissões por perfil e empresa</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="login-system-status">
@@ -117,7 +128,7 @@ export default function Login() {
         <Card className="login-card">
           <Typography.Title level={3}>Entrar</Typography.Title>
           <Typography.Paragraph type="secondary">
-            Use seu usuário ou e-mail corporativo.
+            Acesse o painel com sua conta corporativa.
           </Typography.Paragraph>
 
           {error ? (

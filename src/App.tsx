@@ -64,27 +64,58 @@ export default function App() {
       algorithm:
         themeMode === 'dark' ? theme.darkAlgorithm : theme.defaultAlgorithm,
       token: {
-        colorPrimary: '#0f766e',
-        colorInfo: '#2563eb',
+        colorPrimary: '#3b6ff5',
+        colorInfo: '#3b82f6',
         colorSuccess: '#16a34a',
-        colorWarning: '#d97706',
-        colorError: '#dc2626',
-        borderRadius: 8,
+        colorWarning: '#f59e0b',
+        colorError: '#ef4444',
+        borderRadius: 12,
+        controlHeight: 38,
         fontFamily:
           'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
       },
       components: {
+        Button: {
+          borderRadius: 10,
+          controlHeight: 38,
+          fontWeight: 600,
+          primaryShadow: '0 8px 18px rgba(59, 111, 245, 0.22)',
+        },
         Layout: {
-          bodyBg: themeMode === 'dark' ? '#101418' : '#f5f7fa',
-          headerBg: themeMode === 'dark' ? '#151b21' : '#ffffff',
-          siderBg: themeMode === 'dark' ? '#0e1318' : '#ffffff',
+          bodyBg: themeMode === 'dark' ? '#0f1420' : '#f4f7fb',
+          headerBg: themeMode === 'dark' ? '#171d2a' : '#ffffff',
+          siderBg: '#111a2e',
         },
         Menu: {
-          itemBorderRadius: 6,
-          itemMarginInline: 8,
+          darkItemBg: '#111a2e',
+          darkItemColor: '#aebbd0',
+          darkItemHoverBg: 'rgba(255, 255, 255, 0.07)',
+          darkItemHoverColor: '#ffffff',
+          darkItemSelectedBg: '#3b6ff5',
+          darkItemSelectedColor: '#ffffff',
+          itemBorderRadius: 10,
+          itemHeight: 44,
+          itemMarginInline: 12,
+          itemMarginBlock: 4,
         },
         Card: {
-          borderRadiusLG: 8,
+          borderRadiusLG: 16,
+          boxShadowTertiary: '0 8px 24px rgba(27, 39, 68, 0.06)',
+        },
+        Input: {
+          activeBorderColor: '#3b6ff5',
+          hoverBorderColor: '#7295f8',
+        },
+        Select: {
+          optionSelectedBg: 'rgba(59, 111, 245, 0.1)',
+        },
+        Table: {
+          headerBg: themeMode === 'dark' ? '#1b2230' : '#f7f9fc',
+          headerColor: themeMode === 'dark' ? '#d9e2f1' : '#53627a',
+          rowHoverBg:
+            themeMode === 'dark'
+              ? 'rgba(59, 111, 245, 0.08)'
+              : 'rgba(59, 111, 245, 0.035)',
         },
       },
     }),
