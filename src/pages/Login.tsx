@@ -37,6 +37,7 @@ type RecoveryFormValues = {
 };
 
 export default function Login() {
+  const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
   const [form] = Form.useForm<LoginFormValues>();
   const [recoveryForm] = Form.useForm<RecoveryFormValues>();
   const [error, setError] = useState('');
@@ -165,12 +166,14 @@ export default function Login() {
               <Form.Item name="remember" valuePropName="checked">
                 <Checkbox>Manter conectado neste dispositivo</Checkbox>
               </Form.Item>
-              <Button
-                onClick={() => setRecoveryOpen(true)}
-                type="link"
-              >
-                Esqueci minha senha
-              </Button>
+              {isDemoMode ? (
+                <Button
+                  onClick={() => setRecoveryOpen(true)}
+                  type="link"
+                >
+                  Esqueci minha senha
+                </Button>
+              ) : null}
             </div>
             <Button
               block
@@ -184,34 +187,36 @@ export default function Login() {
             </Button>
           </Form>
 
-          <div className="demo-accounts">
-            <Typography.Text strong>Acessos de demonstração</Typography.Text>
-            {demoAccounts
-              .filter((account) =>
-                ['super_admin', 'admin', 'user'].includes(account.role),
-              )
-              .map((account) => (
-              <button
-                className="demo-account"
-                key={account.username}
-                onClick={() =>
-                  form.setFieldsValue({
-                    identifier: account.username,
-                    password: account.password,
-                  })
-                }
-                type="button"
-              >
-                <span>
-                  <Tag color={roleProfiles[account.role].color}>
-                    {roleProfiles[account.role].label}
-                  </Tag>
-                  <Typography.Text>{account.username}</Typography.Text>
-                </span>
-                <Typography.Text code>{account.password}</Typography.Text>
-              </button>
-              ))}
-          </div>
+          {isDemoMode ? (
+            <div className="demo-accounts">
+              <Typography.Text strong>Acessos de demonstração</Typography.Text>
+              {demoAccounts
+                .filter((account) =>
+                  ['super_admin', 'admin', 'user'].includes(account.role),
+                )
+                .map((account) => (
+                  <button
+                    className="demo-account"
+                    key={account.username}
+                    onClick={() =>
+                      form.setFieldsValue({
+                        identifier: account.username,
+                        password: account.password,
+                      })
+                    }
+                    type="button"
+                  >
+                    <span>
+                      <Tag color={roleProfiles[account.role].color}>
+                        {roleProfiles[account.role].label}
+                      </Tag>
+                      <Typography.Text>{account.username}</Typography.Text>
+                    </span>
+                    <Typography.Text code>{account.password}</Typography.Text>
+                  </button>
+                ))}
+            </div>
+          ) : null}
         </Card>
       </section>
 
