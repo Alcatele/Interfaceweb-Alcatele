@@ -1,3 +1,13 @@
+{
+    log default {
+        format filter {
+            request>headers>Authorization delete
+            request>headers>Cookie delete
+            request>headers>X-Realtime-Token delete
+        }
+    }
+}
+
 {$APP_DOMAIN} {
     encode zstd gzip
 
