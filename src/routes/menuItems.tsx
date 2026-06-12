@@ -22,7 +22,6 @@ import {
   ToolOutlined,
   UsergroupAddOutlined,
   BankOutlined,
-  SendOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { ReactNode } from 'react';
@@ -161,12 +160,6 @@ export const routeItems: RouteItem[] = [
     label: 'Correio de voz',
     path: '/correio-voz',
     icon: <MailOutlined />,
-  },
-  {
-    key: 'whatsapp',
-    label: 'WhatsApp',
-    path: '/whatsapp',
-    icon: <SendOutlined />,
   },
   {
     key: 'security-audit',

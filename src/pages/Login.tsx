@@ -186,7 +186,11 @@ export default function Login() {
 
           <div className="demo-accounts">
             <Typography.Text strong>Acessos de demonstração</Typography.Text>
-            {demoAccounts.map((account) => (
+            {demoAccounts
+              .filter((account) =>
+                ['super_admin', 'admin', 'user'].includes(account.role),
+              )
+              .map((account) => (
               <button
                 className="demo-account"
                 key={account.username}
@@ -206,7 +210,7 @@ export default function Login() {
                 </span>
                 <Typography.Text code>{account.password}</Typography.Text>
               </button>
-            ))}
+              ))}
           </div>
         </Card>
       </section>

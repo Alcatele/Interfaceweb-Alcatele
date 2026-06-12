@@ -1,4 +1,4 @@
-﻿import {
+import {
   DeleteOutlined,
   EditOutlined,
   PlusOutlined,
@@ -12,6 +12,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Select,
   Space,
   Switch,
   Table,
@@ -19,66 +20,77 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
-import { OutboundRoute, outboundRoutes } from '../services/mockData';
+import { useAuth } from '../contexts/useAuth';
+import { mvpApi } from '../services/mvpApi';
+import type { OutboundRoute, SipTrunk } from '../services/mockData';
 
-type OutboundRouteFormValues = Omit<OutboundRoute, 'id'>;
+type RouteRow = OutboundRoute & { trunkId: string };
+type FormValues = Omit<OutboundRoute, 'id' | 'trunk'> & { trunkId: string };
 
 export default function OutboundRoutes() {
-  const [form] = Form.useForm<OutboundRouteFormValues>();
-  const [items, setItems] = useState(outboundRoutes);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<OutboundRoute | null>(null);
+  const [form] = Form.useForm<FormValues>();
+  const { activeTenant, hasPermission } = useAuth();
+  const [items, setItems] = useState<RouteRow[]>([]);
+  const [trunks, setTrunks] = useState<SipTrunk[]>([]);
+  const [editing, setEditing] = useState<RouteRow | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
+  const canManage = hasPermission('pbx.configure');
 
-  function openCreate() {
-    setEditing(null);
-    form.setFieldsValue({ priority: items.length + 1, enabled: true });
-    setModalOpen(true);
-  }
-
-  function openEdit(route: OutboundRoute) {
-    setEditing(route);
-    form.setFieldsValue(route);
-    setModalOpen(true);
-  }
-
-  function closeModal() {
-    form.resetFields();
-    setEditing(null);
-    setModalOpen(false);
-  }
-
-  function saveRoute(values: OutboundRouteFormValues) {
-    if (editing) {
-      setItems((current) =>
-        current.map((item) =>
-          item.id === editing.id ? { ...values, id: editing.id } : item,
-        ),
-      );
-      messageApi.success(`Rota ${values.name} atualizada.`);
-    } else {
-      setItems((current) => [
-        ...current,
-        { ...values, id: `out-${Date.now()}` },
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [routes, nextTrunks] = await Promise.all([
+        mvpApi.listOutboundRoutes(),
+        mvpApi.listTrunks(),
       ]);
-      messageApi.success(`Rota ${values.name} criada.`);
+      setItems(routes);
+      setTrunks(nextTrunks);
+    } catch {
+      messageApi.error('Não foi possível carregar as rotas.');
+    } finally {
+      setLoading(false);
     }
+  }, [messageApi]);
 
-    closeModal();
+  useEffect(() => {
+    void load();
+  }, [activeTenant?.id, load]);
+
+  async function save(values: FormValues) {
+    try {
+      if (editing) {
+        await mvpApi.updateOutboundRoute(editing.id, values);
+      } else {
+        await mvpApi.createOutboundRoute(values);
+      }
+      messageApi.success('Rota enviada para provisionamento.');
+      setOpen(false);
+      setEditing(null);
+      form.resetFields();
+      await load();
+    } catch {
+      messageApi.error('Não foi possível salvar a rota.');
+    }
   }
 
-  function removeRoute(route: OutboundRoute) {
-    setItems((current) => current.filter((item) => item.id !== route.id));
-    messageApi.success(`Rota ${route.name} apagada.`);
+  async function remove(route: RouteRow) {
+    try {
+      await mvpApi.removeOutboundRoute(route.id);
+      await load();
+    } catch {
+      messageApi.error('Não foi possível remover a rota.');
+    }
   }
 
-  const columns: ColumnsType<OutboundRoute> = [
-    { title: 'Prioridade', dataIndex: 'priority', key: 'priority', width: 110 },
+  const columns: ColumnsType<RouteRow> = [
+    { title: 'Prioridade', dataIndex: 'priority', key: 'priority' },
     { title: 'Nome', dataIndex: 'name', key: 'name' },
     {
-      title: 'Padrao discado',
+      title: 'Padrão',
       dataIndex: 'pattern',
       key: 'pattern',
       render: (value: string) => <Tag>{value}</Tag>,
@@ -86,13 +98,13 @@ export default function OutboundRoutes() {
     {
       title: 'Fluxo',
       key: 'flow',
-      render: (_, record) => (
+      render: (_, route) => (
         <div className="route-flow">
           <Tag>Discagem</Tag>
           <SwapRightOutlined />
-          <Tag color="blue">{record.pattern}</Tag>
+          <Tag color="blue">{route.pattern}</Tag>
           <SwapRightOutlined />
-          <Tag color="green">{record.trunk}</Tag>
+          <Tag color="green">{route.trunk}</Tag>
         </div>
       ),
     },
@@ -100,38 +112,44 @@ export default function OutboundRoutes() {
       title: 'Ativa',
       dataIndex: 'enabled',
       key: 'enabled',
-      render: (enabled: boolean) => <Switch checked={enabled} />,
+      render: (enabled: boolean) => <Switch checked={enabled} disabled />,
+    },
+    {
+      title: 'Sincronização',
+      dataIndex: 'syncStatus',
+      key: 'syncStatus',
+      render: (status: string) => (
+        <Tag color={status === 'synced' ? 'success' : 'warning'}>
+          {status ?? 'pending'}
+        </Tag>
+      ),
     },
     {
       title: 'Ações',
       key: 'actions',
-      width: 80,
-      render: (_, route) => (
-        <Space>
-          <Button
-            aria-label={`Editar rota ${route.name}`}
-            title={`Editar rota ${route.name}`}
-            icon={<EditOutlined />}
-            onClick={() => openEdit(route)}
-            size="small"
-          />
-          <Popconfirm
-          cancelText="Cancelar"
-          okButtonProps={{ danger: true }}
-          okText="Apagar"
-          onConfirm={() => removeRoute(route)}
-          title={`Apagar a rota ${route.name}?`}
-        >
-          <Button
-            aria-label={`Apagar rota ${route.name}`}
-            title={`Apagar rota ${route.name}`}
-            danger
-            icon={<DeleteOutlined />}
-            size="small"
-          />
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_, route) =>
+        canManage ? (
+          <Space>
+            <Button
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditing(route);
+                form.setFieldsValue(route);
+                setOpen(true);
+              }}
+              size="small"
+            />
+            <Popconfirm
+              cancelText="Cancelar"
+              okButtonProps={{ danger: true }}
+              okText="Apagar"
+              onConfirm={() => void remove(route)}
+              title={`Apagar a rota ${route.name}?`}
+            >
+              <Button danger icon={<DeleteOutlined />} size="small" />
+            </Popconfirm>
+          </Space>
+        ) : null,
     },
   ];
 
@@ -140,50 +158,73 @@ export default function OutboundRoutes() {
       {contextHolder}
       <PageHeader
         actions={
-          <Button icon={<PlusOutlined />} onClick={openCreate} type="primary">
-            Nova rota
-          </Button>
+          canManage ? (
+            <Button
+              disabled={trunks.length === 0}
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setEditing(null);
+                form.setFieldsValue({
+                  enabled: true,
+                  priority: items.length + 1,
+                  trunkId: trunks[0]?.id,
+                });
+                setOpen(true);
+              }}
+              type="primary"
+            >
+              Nova rota
+            </Button>
+          ) : undefined
         }
-        kicker="Politicas de discagem"
+        kicker="Discagem"
         title="Rotas de saída"
-        description="Defina padrões de discagem, precedencia e troncos usados para chamadas locais, nacionais e internacionais."
+        description="Defina padrões e o tronco utilizado em cada tipo de chamada."
       />
       <Card className="soft-panel">
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Table
-            columns={columns}
-            dataSource={items}
-            pagination={false}
-            rowKey="id"
-          />
-        </Space>
+        <Table
+          columns={columns}
+          dataSource={items}
+          loading={loading}
+          pagination={false}
+          rowKey="id"
+        />
       </Card>
       <Modal
         footer={null}
-        onCancel={closeModal}
-        open={modalOpen}
-        title={editing ? 'Editar rota de saída' : 'Nova rota de saída'}
+        onCancel={() => setOpen(false)}
+        open={open}
+        title={editing ? 'Editar rota' : 'Nova rota'}
       >
-        <Form form={form} layout="vertical" onFinish={saveRoute}>
+        <Form form={form} layout="vertical" onFinish={save}>
           <Form.Item label="Nome" name="name" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="Padrao discado" name="pattern" rules={[{ required: true }]}>
-            <Input placeholder="0XX[1-9]XXXXXXXX" />
+          <Form.Item label="Padrão" name="pattern" rules={[{ required: true }]}>
+            <Input placeholder="^0?[1-9][0-9]{9,10}$" />
           </Form.Item>
-          <Form.Item label="Tronco" name="trunk" rules={[{ required: true }]}>
-            <Input />
+          <Form.Item label="Tronco" name="trunkId" rules={[{ required: true }]}>
+            <Select
+              options={trunks.map((trunk) => ({
+                label: trunk.name,
+                value: trunk.id,
+              }))}
+            />
           </Form.Item>
-          <Form.Item label="Prioridade" name="priority" rules={[{ required: true }]}>
-            <InputNumber min={1} style={{ width: '100%' }} />
+          <Form.Item
+            label="Prioridade"
+            name="priority"
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item label="Ativa" name="enabled" valuePropName="checked">
             <Switch />
           </Form.Item>
           <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
-            <Button onClick={closeModal}>Cancelar</Button>
+            <Button onClick={() => setOpen(false)}>Cancelar</Button>
             <Button htmlType="submit" type="primary">
-              {editing ? 'Salvar rota' : 'Criar rota'}
+              Salvar
             </Button>
           </Space>
         </Form>
@@ -191,4 +232,3 @@ export default function OutboundRoutes() {
     </>
   );
 }
-

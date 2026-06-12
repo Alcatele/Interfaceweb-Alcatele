@@ -1,7 +1,6 @@
-﻿import {
+import {
   DeleteOutlined,
   EditOutlined,
-  PhoneOutlined,
   PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
@@ -19,29 +18,49 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import StatusTag from '../components/StatusTag';
 import { useAuth } from '../contexts/useAuth';
-import { Extension, extensions } from '../services/mockData';
+import { mvpApi } from '../services/mvpApi';
+import type { Extension } from '../services/mockData';
 
-type ExtensionFormValues = Omit<Extension, 'id'>;
+type ExtensionFormValues = Pick<
+  Extension,
+  'number' | 'name' | 'department' | 'device' | 'status'
+>;
 
 export default function Extensions() {
   const [form] = Form.useForm<ExtensionFormValues>();
-  const { hasPermission } = useAuth();
-  const [items, setItems] = useState(extensions);
+  const { activeTenant, hasPermission } = useAuth();
+  const [items, setItems] = useState<Extension[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Extension | null>(null);
+  const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
-  const canManageExtensions = hasPermission('pbx.configure');
+  const canManage = hasPermission('pbx.configure');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await mvpApi.listExtensions());
+    } catch {
+      messageApi.error('Não foi possível carregar os ramais.');
+    } finally {
+      setLoading(false);
+    }
+  }, [messageApi]);
+
+  useEffect(() => {
+    void load();
+  }, [activeTenant?.id, load]);
 
   function openCreate() {
     setEditing(null);
     form.setFieldsValue({
-      tenantId: 'tenant-alcatele',
-      status: 'online',
-      lastSeen: 'Agora',
+      department: 'Geral',
+      device: 'Webphone',
+      status: 'offline',
     });
     setModalOpen(true);
   }
@@ -52,60 +71,37 @@ export default function Extensions() {
     setModalOpen(true);
   }
 
-  function closeModal() {
-    form.resetFields();
-    setEditing(null);
-    setModalOpen(false);
-  }
-
-  function saveExtension(values: ExtensionFormValues) {
-    if (editing) {
-      setItems((current) =>
-        current.map((item) =>
-          item.id === editing.id ? { ...values, id: editing.id } : item,
-        ),
-      );
-      messageApi.success(`Ramal ${values.number} atualizado.`);
-    } else {
-      setItems((current) => [
-        ...current,
-        { ...values, id: `ext-${values.number || Date.now()}` },
-      ]);
-      messageApi.success(`Ramal ${values.number} criado.`);
+  async function save(values: ExtensionFormValues) {
+    try {
+      if (editing) {
+        await mvpApi.updateExtension(editing.id, values);
+      } else {
+        await mvpApi.createExtension(values);
+      }
+      messageApi.success('Ramal salvo e enviado para provisionamento.');
+      form.resetFields();
+      setEditing(null);
+      setModalOpen(false);
+      await load();
+    } catch {
+      messageApi.error('Não foi possível salvar o ramal.');
     }
-
-    closeModal();
   }
 
-  function removeExtension(extension: Extension) {
-    setItems((current) => current.filter((item) => item.id !== extension.id));
-    messageApi.success(`Ramal ${extension.number} apagado.`);
-  }
-
-  function callExtension(extension: Extension) {
-    messageApi.success(`Chamando ramal ${extension.number} - ${extension.name}.`);
+  async function remove(extension: Extension) {
+    try {
+      await mvpApi.removeExtension(extension.id);
+      messageApi.success('Exclusão enviada para o FusionPBX.');
+      await load();
+    } catch {
+      messageApi.error('Não foi possível remover o ramal.');
+    }
   }
 
   const columns: ColumnsType<Extension> = [
-    {
-      title: 'Ramal',
-      dataIndex: 'number',
-      key: 'number',
-      sorter: (a, b) => a.number.localeCompare(b.number),
-    },
+    { title: 'Ramal', dataIndex: 'number', key: 'number' },
     { title: 'Usuário', dataIndex: 'name', key: 'name' },
-    {
-      title: 'Departamento',
-      dataIndex: 'department',
-      key: 'department',
-      filters: [
-        { text: 'Comercial', value: 'Comercial' },
-        { text: 'Suporte', value: 'Suporte' },
-        { text: 'Financeiro', value: 'Financeiro' },
-        { text: 'Operações', value: 'Operações' },
-      ],
-      onFilter: (value, record) => record.department === value,
-    },
+    { title: 'Departamento', dataIndex: 'department', key: 'department' },
     { title: 'Dispositivo', dataIndex: 'device', key: 'device' },
     { title: 'IP', dataIndex: 'ip', key: 'ip' },
     {
@@ -116,152 +112,113 @@ export default function Extensions() {
     },
     { title: 'Última atividade', dataIndex: 'lastSeen', key: 'lastSeen' },
     {
-      title: 'Perfil',
-      key: 'profile',
-      render: () => <Tag color="blue">Standard</Tag>,
+      title: 'Sincronização',
+      dataIndex: 'syncStatus',
+      key: 'syncStatus',
+      render: (status: string) => (
+        <Tag color={status === 'synced' ? 'success' : 'warning'}>
+          {status ?? 'pending'}
+        </Tag>
+      ),
     },
     {
       title: 'Ações',
       key: 'actions',
-      width: canManageExtensions ? 132 : 70,
-      render: (_, extension) => (
-        <Space>
-          <Button
-            aria-label={`Chamar ramal ${extension.number}`}
-            title={`Chamar ramal ${extension.number}`}
-            icon={<PhoneOutlined />}
-            onClick={() => callExtension(extension)}
-            size="small"
-          />
-          {canManageExtensions ? (
-            <>
-              <Button
-                aria-label={`Editar ramal ${extension.number}`}
-                title={`Editar ramal ${extension.number}`}
-                icon={<EditOutlined />}
-                onClick={() => openEdit(extension)}
-                size="small"
-              />
-              <Popconfirm
-                cancelText="Cancelar"
-                okButtonProps={{ danger: true }}
-                okText="Apagar"
-                onConfirm={() => removeExtension(extension)}
-                title={`Apagar o ramal ${extension.number}?`}
-              >
-                <Button
-                  aria-label={`Apagar ramal ${extension.number}`}
-                  title={`Apagar ramal ${extension.number}`}
-                  danger
-                  icon={<DeleteOutlined />}
-                  size="small"
-                />
-              </Popconfirm>
-            </>
-          ) : null}
-        </Space>
-      ),
+      render: (_, extension) =>
+        canManage ? (
+          <Space>
+            <Button
+              icon={<EditOutlined />}
+              onClick={() => openEdit(extension)}
+              size="small"
+            />
+            <Popconfirm
+              cancelText="Cancelar"
+              okButtonProps={{ danger: true }}
+              okText="Apagar"
+              onConfirm={() => void remove(extension)}
+              title={`Apagar o ramal ${extension.number}?`}
+            >
+              <Button danger icon={<DeleteOutlined />} size="small" />
+            </Popconfirm>
+          </Space>
+        ) : null,
     },
   ];
-
-  const headerActions = canManageExtensions ? (
-    <>
-      <Button
-        icon={<ReloadOutlined />}
-        onClick={() => messageApi.success('Ramais sincronizados.')}
-      >
-        Sincronizar
-      </Button>
-      <Button icon={<PlusOutlined />} onClick={openCreate} type="primary">
-        Novo ramal
-      </Button>
-    </>
-  ) : undefined;
 
   return (
     <>
       {contextHolder}
       <PageHeader
-        actions={headerActions}
-        kicker="Usuários e dispositivos"
+        actions={
+          canManage ? (
+            <>
+              <Button icon={<ReloadOutlined />} onClick={() => void load()}>
+                Atualizar
+              </Button>
+              <Button icon={<PlusOutlined />} onClick={openCreate} type="primary">
+                Novo ramal
+              </Button>
+            </>
+          ) : undefined
+        }
+        kicker="FusionPBX"
         title="Ramais"
-        description="Consulte ramais, presença SIP, aparelhos, departamentos e perfis de chamada."
+        description="Inventário de ramais do tenant ativo e estado de provisionamento."
       />
       <Card className="soft-panel">
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Input.Search
-            allowClear
-            placeholder="Buscar por ramal, usuário, departamento ou IP"
-            style={{ maxWidth: 440 }}
-          />
-          <Table
-            columns={columns}
-            dataSource={items}
-            pagination={{ pageSize: 8 }}
-            rowKey="id"
-          />
-        </Space>
+        <Table
+          columns={columns}
+          dataSource={items}
+          loading={loading}
+          pagination={{ pageSize: 10 }}
+          rowKey="id"
+        />
       </Card>
-      {canManageExtensions ? (
-        <Modal
-          footer={null}
-          onCancel={closeModal}
-          open={modalOpen}
-          title={editing ? 'Editar ramal' : 'Novo ramal'}
-        >
-          <Form form={form} layout="vertical" onFinish={saveExtension}>
-            <Space align="start" size={12} style={{ width: '100%' }}>
-              <Form.Item
-                label="Ramal"
-                name="number"
-                rules={[{ required: true, message: 'Informe o ramal.' }]}
-                style={{ width: 130 }}
-              >
-                <Input />
-              </Form.Item>
-              <Form.Item
-                label="Usuário"
-                name="name"
-                rules={[{ required: true, message: 'Informe o usuário.' }]}
-                style={{ flex: 1 }}
-              >
-                <Input />
-              </Form.Item>
-            </Space>
-            <Form.Item hidden name="tenantId">
-              <Input />
-            </Form.Item>
-            <Form.Item label="Departamento" name="department" rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item label="Dispositivo" name="device" rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item label="IP" name="ip" rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item label="Status" name="status" rules={[{ required: true }]}>
-              <Select
-                options={[
-                  { label: 'Online', value: 'online' },
-                  { label: 'Offline', value: 'offline' },
-                  { label: 'Atenção', value: 'warning' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item label="Última atividade" name="lastSeen" rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
-            <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
-              <Button onClick={closeModal}>Cancelar</Button>
-              <Button htmlType="submit" type="primary">
-                {editing ? 'Salvar ramal' : 'Criar ramal'}
-              </Button>
-            </Space>
-          </Form>
-        </Modal>
-      ) : null}
+      <Modal
+        footer={null}
+        onCancel={() => setModalOpen(false)}
+        open={modalOpen}
+        title={editing ? 'Editar ramal' : 'Novo ramal'}
+      >
+        <Form form={form} layout="vertical" onFinish={save}>
+          <Form.Item label="Ramal" name="number" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item label="Usuário" name="name" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="Departamento"
+            name="department"
+            rules={[{ required: true }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="Dispositivo"
+            name="device"
+            rules={[{ required: true }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item label="Status" name="status" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { label: 'Online', value: 'online' },
+                { label: 'Offline', value: 'offline' },
+                { label: 'Atenção', value: 'warning' },
+              ]}
+            />
+          </Form.Item>
+          <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
+            <Button onClick={() => setModalOpen(false)}>Cancelar</Button>
+            <Button htmlType="submit" type="primary">
+              Salvar
+            </Button>
+          </Space>
+        </Form>
+      </Modal>
     </>
   );
 }
-

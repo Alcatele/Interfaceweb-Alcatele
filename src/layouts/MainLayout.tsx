@@ -1,6 +1,5 @@
 ﻿import {
   BellOutlined,
-  LockOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -15,6 +14,7 @@ import {
   Grid,
   Layout,
   Menu,
+  Select,
   Space,
   Tooltip,
   Typography,
@@ -23,7 +23,6 @@ import type { MenuProps } from 'antd';
 import { PropsWithChildren, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { ThemeMode } from '../App';
-import ChangePasswordModal from '../components/ChangePasswordModal';
 import { useAuth } from '../contexts/useAuth';
 import { routeItems } from '../routes/menuItems';
 import { roleProfiles } from '../services/accessControl';
@@ -41,12 +40,20 @@ export default function MainLayout({
   onThemeChange,
 }: MainLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const screens = Grid.useBreakpoint();
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = screens.lg === false;
-  const { canAccessRoute, currentUser, logout, role, roleLabel } = useAuth();
+  const {
+    activeTenant,
+    availableTenants,
+    canAccessRoute,
+    currentUser,
+    logout,
+    role,
+    roleLabel,
+    switchTenant,
+  } = useAuth();
 
   const activeKey = useMemo(() => {
     const match =
@@ -133,6 +140,16 @@ export default function MainLayout({
           </div>
 
           <div className="topbar-right">
+            <Select
+              aria-label="Empresa ativa"
+              onChange={(tenantId) => void switchTenant(tenantId)}
+              options={availableTenants.map((tenant) => ({
+                label: tenant.name,
+                value: tenant.id,
+              }))}
+              style={{ minWidth: 210 }}
+              value={activeTenant?.id}
+            />
             <Button
               aria-label={
                 themeMode === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'
@@ -164,15 +181,6 @@ export default function MainLayout({
                   {roleLabel}
                 </Typography.Text>
               </div>
-              <Tooltip title="Alterar minha senha">
-                <Button
-                  aria-label="Alterar minha senha"
-                  icon={<LockOutlined />}
-                  onClick={() => setChangePasswordOpen(true)}
-                  title="Alterar minha senha"
-                  type="text"
-                />
-              </Tooltip>
               <Tooltip title="Sair">
                 <Button
                   aria-label="Sair"
@@ -192,11 +200,6 @@ export default function MainLayout({
           </Typography.Text>
         </Footer>
       </Layout>
-      <ChangePasswordModal
-        onClose={() => setChangePasswordOpen(false)}
-        open={changePasswordOpen}
-        userId={currentUser.id}
-      />
     </Layout>
   );
 }

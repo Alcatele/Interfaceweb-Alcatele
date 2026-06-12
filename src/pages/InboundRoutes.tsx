@@ -1,4 +1,4 @@
-﻿import {
+import {
   DeleteOutlined,
   EditOutlined,
   LoginOutlined,
@@ -12,7 +12,6 @@ import {
   Input,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Switch,
   Table,
@@ -20,60 +19,64 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import DestinationPicker from '../components/DestinationPicker';
 import PageHeader from '../components/PageHeader';
-import { callCalendars, InboundRoute, inboundRoutes } from '../services/mockData';
+import { useAuth } from '../contexts/useAuth';
+import { mvpApi } from '../services/mvpApi';
+import type { InboundRoute } from '../services/mockData';
 
-type InboundRouteFormValues = Omit<InboundRoute, 'id'>;
+type FormValues = Omit<InboundRoute, 'id'>;
 
 export default function InboundRoutes() {
-  const [form] = Form.useForm<InboundRouteFormValues>();
-  const [items, setItems] = useState(inboundRoutes);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [form] = Form.useForm<FormValues>();
+  const { activeTenant, hasPermission } = useAuth();
+  const [items, setItems] = useState<InboundRoute[]>([]);
   const [editing, setEditing] = useState<InboundRoute | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
+  const canManage = hasPermission('pbx.configure');
 
-  function openCreate() {
-    setEditing(null);
-    form.setFieldsValue({ enabled: true, schedule: callCalendars[0]?.name ?? 'Comercial' });
-    setModalOpen(true);
-  }
-
-  function openEdit(route: InboundRoute) {
-    setEditing(route);
-    form.setFieldsValue(route);
-    setModalOpen(true);
-  }
-
-  function closeModal() {
-    form.resetFields();
-    setEditing(null);
-    setModalOpen(false);
-  }
-
-  function saveRoute(values: InboundRouteFormValues) {
-    if (editing) {
-      setItems((current) =>
-        current.map((item) =>
-          item.id === editing.id ? { ...values, id: editing.id } : item,
-        ),
-      );
-      messageApi.success(`Rota do DID ${values.did} atualizada.`);
-    } else {
-      setItems((current) => [
-        ...current,
-        { ...values, id: `in-${Date.now()}` },
-      ]);
-      messageApi.success(`Rota do DID ${values.did} criada.`);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await mvpApi.listInboundRoutes());
+    } catch {
+      messageApi.error('Não foi possível carregar as rotas.');
+    } finally {
+      setLoading(false);
     }
+  }, [messageApi]);
 
-    closeModal();
+  useEffect(() => {
+    void load();
+  }, [activeTenant?.id, load]);
+
+  async function save(values: FormValues) {
+    try {
+      if (editing) {
+        await mvpApi.updateInboundRoute(editing.id, values);
+      } else {
+        await mvpApi.createInboundRoute(values);
+      }
+      messageApi.success('Rota enviada para provisionamento.');
+      setOpen(false);
+      setEditing(null);
+      form.resetFields();
+      await load();
+    } catch {
+      messageApi.error('Não foi possível salvar a rota.');
+    }
   }
 
-  function removeRoute(route: InboundRoute) {
-    setItems((current) => current.filter((item) => item.id !== route.id));
-    messageApi.success(`Rota do DID ${route.did} apagada.`);
+  async function remove(route: InboundRoute) {
+    try {
+      await mvpApi.removeInboundRoute(route.id);
+      await load();
+    } catch {
+      messageApi.error('Não foi possível remover a rota.');
+    }
   }
 
   const columns: ColumnsType<InboundRoute> = [
@@ -83,55 +86,61 @@ export default function InboundRoutes() {
       key: 'did',
       render: (value: string) => <Tag icon={<LoginOutlined />}>{value}</Tag>,
     },
-    { title: 'Descricao', dataIndex: 'description', key: 'description' },
+    { title: 'Descrição', dataIndex: 'description', key: 'description' },
     {
       title: 'Destino',
       key: 'destination',
-      render: (_, record) => (
+      render: (_, route) => (
         <div className="route-flow">
-          <Tag>{record.did}</Tag>
+          <Tag>{route.did}</Tag>
           <SwapRightOutlined />
-          <Tag color="green">{record.destination}</Tag>
+          <Tag color="green">{route.destination}</Tag>
         </div>
       ),
     },
-    { title: 'Horario', dataIndex: 'schedule', key: 'schedule' },
+    { title: 'Horário', dataIndex: 'schedule', key: 'schedule' },
     {
       title: 'Ativa',
       dataIndex: 'enabled',
       key: 'enabled',
-      render: (enabled: boolean) => <Switch checked={enabled} />,
+      render: (enabled: boolean) => <Switch checked={enabled} disabled />,
+    },
+    {
+      title: 'Sincronização',
+      dataIndex: 'syncStatus',
+      key: 'syncStatus',
+      render: (status: string) => (
+        <Tag color={status === 'synced' ? 'success' : 'warning'}>
+          {status ?? 'pending'}
+        </Tag>
+      ),
     },
     {
       title: 'Ações',
       key: 'actions',
-      width: 80,
-      render: (_, route) => (
-        <Space>
-          <Button
-            aria-label={`Editar rota do DID ${route.did}`}
-            title={`Editar rota do DID ${route.did}`}
-            icon={<EditOutlined />}
-            onClick={() => openEdit(route)}
-            size="small"
-          />
-          <Popconfirm
-          cancelText="Cancelar"
-          okButtonProps={{ danger: true }}
-          okText="Apagar"
-          onConfirm={() => removeRoute(route)}
-          title={`Apagar a rota do DID ${route.did}?`}
-        >
-          <Button
-            aria-label={`Apagar rota do DID ${route.did}`}
-            title={`Apagar rota do DID ${route.did}`}
-            danger
-            icon={<DeleteOutlined />}
-            size="small"
-          />
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_, route) =>
+        canManage ? (
+          <Space>
+            <Button
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditing(route);
+                form.setFieldsValue(route);
+                setOpen(true);
+              }}
+              size="small"
+            />
+            <Popconfirm
+              cancelText="Cancelar"
+              okButtonProps={{ danger: true }}
+              okText="Apagar"
+              onConfirm={() => void remove(route)}
+              title={`Apagar a rota ${route.did}?`}
+            >
+              <Button danger icon={<DeleteOutlined />} size="small" />
+            </Popconfirm>
+          </Space>
+        ) : null,
     },
   ];
 
@@ -140,53 +149,71 @@ export default function InboundRoutes() {
       {contextHolder}
       <PageHeader
         actions={
-          <Button icon={<PlusOutlined />} onClick={openCreate} type="primary">
-            Nova rota
-          </Button>
+          canManage ? (
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setEditing(null);
+                form.setFieldsValue({ enabled: true, schedule: 'Sempre' });
+                setOpen(true);
+              }}
+              type="primary"
+            >
+              Nova rota
+            </Button>
+          ) : undefined
         }
-        kicker="DIDs e destinos"
+        kicker="DIDs"
         title="Rotas de entrada"
-        description="Controle números publicados, horários de atendimento e destinos como URA, filas ou ramais."
+        description="Associe números publicados a destinos do FusionPBX."
       />
       <Card className="soft-panel">
         <Table
           columns={columns}
           dataSource={items}
+          loading={loading}
           pagination={false}
           rowKey="id"
         />
       </Card>
       <Modal
         footer={null}
-        onCancel={closeModal}
-        open={modalOpen}
-        title={editing ? 'Editar rota de entrada' : 'Nova rota de entrada'}
+        onCancel={() => setOpen(false)}
+        open={open}
+        title={editing ? 'Editar rota' : 'Nova rota'}
       >
-        <Form form={form} layout="vertical" onFinish={saveRoute}>
+        <Form form={form} layout="vertical" onFinish={save}>
           <Form.Item label="DID" name="did" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="Descricao" name="description" rules={[{ required: true }]}>
+          <Form.Item
+            label="Descrição"
+            name="description"
+            rules={[{ required: true }]}
+          >
             <Input />
           </Form.Item>
-          <Form.Item label="Destino" name="destination" rules={[{ required: true }]}>
+          <Form.Item
+            label="Destino"
+            name="destination"
+            rules={[{ required: true }]}
+          >
             <DestinationPicker />
           </Form.Item>
-          <Form.Item label="Calendário / horário" name="schedule" rules={[{ required: true }]}>
-            <Select
-              options={callCalendars.map((calendar) => ({
-                label: calendar.name,
-                value: calendar.name,
-              }))}
-            />
+          <Form.Item
+            label="Horário"
+            name="schedule"
+            rules={[{ required: true }]}
+          >
+            <Input />
           </Form.Item>
           <Form.Item label="Ativa" name="enabled" valuePropName="checked">
             <Switch />
           </Form.Item>
           <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
-            <Button onClick={closeModal}>Cancelar</Button>
+            <Button onClick={() => setOpen(false)}>Cancelar</Button>
             <Button htmlType="submit" type="primary">
-              {editing ? 'Salvar rota' : 'Criar rota'}
+              Salvar
             </Button>
           </Space>
         </Form>
@@ -194,4 +221,3 @@ export default function InboundRoutes() {
     </>
   );
 }
-

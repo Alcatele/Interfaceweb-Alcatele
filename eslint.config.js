@@ -5,7 +5,15 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist'] },
+  {
+    ignores: [
+      '**/dist/**',
+      'Interfaceweb-Alcatele/**',
+      'src/components/WhatsAppChat.tsx',
+      'src/pages/WhatsAppIntegration.tsx',
+      'src/pages/WhatsAppMessaging.tsx',
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],

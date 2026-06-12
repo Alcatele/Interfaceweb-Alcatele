@@ -1,103 +1,137 @@
-﻿import {
+import {
   type PropsWithChildren,
+  useCallback,
+  useEffect,
   useMemo,
   useState,
 } from 'react';
 import {
-  canRoleAccessRoute,
-  roleHasPermission,
   roleProfiles,
-  roleRouteAccess,
+  type RouteKey,
+  type UserRole,
 } from '../services/accessControl';
-import {
-  getAccessSettings,
-  saveAccessSettings,
-} from '../services/accessSettings';
-import {
-  authenticateMockUser,
-  getPublicUserById,
-  type PublicUser,
-} from '../services/mockUsers';
+import { getAccessSettings, saveAccessSettings } from '../services/accessSettings';
+import { mvpApi, type SessionData } from '../services/mvpApi';
+import type { PublicUser } from '../services/mockUsers';
 import {
   AuthContext,
   type AuthContextValue,
   type LoginCredentials,
 } from './authContextCore';
 
-const persistentSessionKey = 'pabx-cloud-session';
-const temporarySessionKey = 'pabx-cloud-session-temp';
+const mvpRoutes: Record<UserRole, RouteKey[]> = {
+  super_admin: [
+    'tenants',
+    'dashboard',
+    'extensions',
+    'sip-trunks',
+    'outbound-routes',
+    'inbound-routes',
+    'webphone',
+    'settings',
+  ],
+  admin: [
+    'dashboard',
+    'extensions',
+    'sip-trunks',
+    'outbound-routes',
+    'inbound-routes',
+    'webphone',
+    'settings',
+  ],
+  supervisor: ['dashboard', 'extensions', 'webphone'],
+  agent: ['dashboard', 'extensions', 'webphone'],
+  user: ['dashboard', 'extensions', 'webphone'],
+};
 
-function getInitialUser(): PublicUser | null {
-  const userId =
-    window.localStorage.getItem(persistentSessionKey) ??
-    window.sessionStorage.getItem(temporarySessionKey);
+function normalizeRole(role: string): UserRole {
+  return ['super_admin', 'admin', 'supervisor', 'agent', 'user'].includes(role)
+    ? (role as UserRole)
+    : 'user';
+}
 
-  return userId ? getPublicUserById(userId) : null;
+function toPublicUser(session: SessionData): PublicUser {
+  return {
+    id: session.user.id,
+    name: session.user.name,
+    username: session.user.username,
+    email: session.user.email,
+    role: normalizeRole(session.role),
+    extension: '',
+    status: 'active',
+    lastAccess: 'Sessão atual',
+  };
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
-  const [currentUser, setCurrentUser] = useState<PublicUser | null>(
-    getInitialUser,
-  );
+  const [session, setSession] = useState<SessionData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [accessSettings, setAccessSettings] = useState(getAccessSettings);
-  const role = currentUser?.role ?? 'user';
+  const role = normalizeRole(session?.role ?? 'user');
+
+  const refreshSession = useCallback(async () => {
+    try {
+      setSession(await mvpApi.me());
+    } catch {
+      setSession(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSession();
+  }, [refreshSession]);
+
+  const login = useCallback(
+    async ({ identifier, password, remember }: LoginCredentials) => {
+      try {
+        await mvpApi.login(identifier, password, remember);
+        await refreshSession();
+        return { success: true };
+      } catch {
+        return {
+          success: false,
+          error: 'Usuário, e-mail ou senha inválidos.',
+        };
+      }
+    },
+    [refreshSession],
+  );
+
+  const logout = useCallback(() => {
+    void mvpApi.logout().finally(() => setSession(null));
+  }, []);
+
+  const switchTenant = useCallback(
+    async (tenantId: string) => {
+      setIsLoading(true);
+      await mvpApi.switchTenant(tenantId);
+      await refreshSession();
+    },
+    [refreshSession],
+  );
+
+  const currentUser = session ? toPublicUser(session) : null;
+  const allowedRoutes = mvpRoutes[role];
 
   const value = useMemo<AuthContextValue>(
     () => ({
+      activeTenant: session?.tenant ?? null,
       adminCanViewRecordings: accessSettings.adminCanViewRecordings,
-      allowedRoutes: roleRouteAccess[role].filter(
-        (routeKey) =>
-          !(
-            role === 'admin' &&
-            routeKey === 'recordings' &&
-            !accessSettings.adminCanViewRecordings
-          ),
-      ),
+      allowedRoutes,
+      availableTenants: session?.availableTenants ?? [],
       canAccessRoute: (routeKey) =>
-        !(
-          role === 'admin' &&
-          routeKey === 'recordings' &&
-          !accessSettings.adminCanViewRecordings
-        ) && canRoleAccessRoute(role, routeKey),
+        allowedRoutes.includes(routeKey as RouteKey),
       currentUser,
       hasPermission: (permissionKey) =>
-        !(
-          role === 'admin' &&
-          permissionKey === 'recordings.view' &&
-          !accessSettings.adminCanViewRecordings
-        ) && roleHasPermission(role, permissionKey),
+        session?.permissions.includes(permissionKey) ?? false,
       isAuthenticated: currentUser !== null,
-      login: async ({
-        identifier,
-        password,
-        remember,
-      }: LoginCredentials) => {
-        const user = await authenticateMockUser(identifier, password);
-
-        if (!user) {
-          return {
-            success: false,
-            error: 'Usuário, e-mail ou senha invalidos.',
-          };
-        }
-
-        window.localStorage.removeItem(persistentSessionKey);
-        window.sessionStorage.removeItem(temporarySessionKey);
-
-        if (remember) {
-          window.localStorage.setItem(persistentSessionKey, user.id);
-        } else {
-          window.sessionStorage.setItem(temporarySessionKey, user.id);
-        }
-
-        setCurrentUser(user);
-        return { success: true };
-      },
-      logout: () => {
-        window.localStorage.removeItem(persistentSessionKey);
-        window.sessionStorage.removeItem(temporarySessionKey);
-        setCurrentUser(null);
-      },
+      isLoading,
+      login,
+      logout,
+      permissions: session?.permissions ?? [],
+      refreshSession,
       role,
       roleLabel: roleProfiles[role].label,
       setAdminCanViewRecordings: (enabled) => {
@@ -108,10 +142,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
         saveAccessSettings(nextSettings);
         setAccessSettings(nextSettings);
       },
+      switchTenant,
     }),
-    [accessSettings, currentUser, role],
+    [
+      accessSettings,
+      allowedRoutes,
+      currentUser,
+      isLoading,
+      login,
+      logout,
+      refreshSession,
+      role,
+      session,
+      switchTenant,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-

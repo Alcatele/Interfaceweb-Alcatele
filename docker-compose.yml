@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: alcatele_mvp
+      POSTGRES_USER: alcatele
+      POSTGRES_PASSWORD: alcatele
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alcatele -d alcatele_mvp"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/postgresql/mvp_schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+
+  api:
+    build:
+      context: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://alcatele:alcatele@postgres:5432/alcatele_mvp
+      FRONTEND_ORIGIN: http://localhost:8080
+      COOKIE_SECURE: "false"
+      WEBPHONE_SIP_DOMAIN: ${WEBPHONE_SIP_DOMAIN:-pbx.alcatele.local}
+      WEBPHONE_WSS_URL: ${WEBPHONE_WSS_URL:-wss://pbx.alcatele.local:7443}
+      WEBPHONE_ALLOW_MOCK: ${WEBPHONE_ALLOW_MOCK:-true}
+      WEBPHONE_MOCK_PASSWORD: ${WEBPHONE_MOCK_PASSWORD:-ChangeMe-WebRTC}
+      FUSIONPBX_BRIDGE_URL: ${FUSIONPBX_BRIDGE_URL:-}
+      FUSIONPBX_BRIDGE_API_KEY: ${FUSIONPBX_BRIDGE_API_KEY:-}
+    expose:
+      - "3000"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres_data:

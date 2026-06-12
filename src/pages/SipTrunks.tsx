@@ -1,106 +1,110 @@
-﻿import {
+import {
   DeleteOutlined,
   EditOutlined,
   PlusOutlined,
-  ThunderboltOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import {
   Button,
   Card,
-  Col,
-  Descriptions,
   Form,
   Input,
   InputNumber,
   Modal,
   Popconfirm,
-  Progress,
-  Row,
-  Select,
   Space,
   Table,
   Tag,
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import StatusTag from '../components/StatusTag';
-import { SipTrunk, sipTrunks } from '../services/mockData';
+import { useAuth } from '../contexts/useAuth';
+import { mvpApi } from '../services/mvpApi';
+import type { SipTrunk } from '../services/mockData';
 
-type SipTrunkFormValues = Omit<SipTrunk, 'id'>;
+type TrunkFormValues = Pick<
+  SipTrunk,
+  'name' | 'provider' | 'host' | 'channels' | 'status'
+>;
 
 export default function SipTrunks() {
-  const [form] = Form.useForm<SipTrunkFormValues>();
-  const [items, setItems] = useState(sipTrunks);
-  const [modalOpen, setModalOpen] = useState(false);
+  const [form] = Form.useForm<TrunkFormValues>();
+  const { activeTenant, hasPermission } = useAuth();
+  const [items, setItems] = useState<SipTrunk[]>([]);
   const [editing, setEditing] = useState<SipTrunk | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
+  const canManage = hasPermission('pbx.configure');
 
-  function openCreate() {
-    setEditing(null);
-    form.setFieldsValue({
-      tenantId: 'tenant-alcatele',
-      channels: 10,
-      latency: 35,
-      status: 'registered',
-    });
-    setModalOpen(true);
-  }
-
-  function openEdit(trunk: SipTrunk) {
-    setEditing(trunk);
-    form.setFieldsValue(trunk);
-    setModalOpen(true);
-  }
-
-  function closeModal() {
-    form.resetFields();
-    setEditing(null);
-    setModalOpen(false);
-  }
-
-  function saveTrunk(values: SipTrunkFormValues) {
-    if (editing) {
-      setItems((current) =>
-        current.map((item) =>
-          item.id === editing.id ? { ...values, id: editing.id } : item,
-        ),
-      );
-      messageApi.success(`Tronco ${values.name} atualizado.`);
-    } else {
-      setItems((current) => [
-        ...current,
-        { ...values, id: `trk-${Date.now()}` },
-      ]);
-      messageApi.success(`Tronco ${values.name} criado.`);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await mvpApi.listTrunks());
+    } catch {
+      messageApi.error('Não foi possível carregar os troncos.');
+    } finally {
+      setLoading(false);
     }
+  }, [messageApi]);
 
-    closeModal();
+  useEffect(() => {
+    void load();
+  }, [activeTenant?.id, load]);
+
+  async function save(values: TrunkFormValues) {
+    try {
+      if (editing) {
+        await mvpApi.updateTrunk(editing.id, values);
+      } else {
+        await mvpApi.createTrunk(values);
+      }
+      messageApi.success('Tronco salvo e enviado para provisionamento.');
+      form.resetFields();
+      setEditing(null);
+      setModalOpen(false);
+      await load();
+    } catch {
+      messageApi.error('Não foi possível salvar o tronco.');
+    }
   }
 
-  function removeTrunk(trunk: SipTrunk) {
-    setItems((current) => current.filter((item) => item.id !== trunk.id));
-    messageApi.success(`Tronco ${trunk.name} apagado.`);
+  async function remove(trunk: SipTrunk) {
+    try {
+      await mvpApi.removeTrunk(trunk.id);
+      await load();
+    } catch {
+      messageApi.error('Não foi possível remover o tronco.');
+    }
+  }
+
+  async function synchronize() {
+    setSyncing(true);
+    try {
+      const result = await mvpApi.syncFusionPbx();
+      messageApi.success(`${result.synchronized} recursos sincronizados.`);
+      await load();
+    } catch {
+      messageApi.error('Falha na sincronização.');
+    } finally {
+      setSyncing(false);
+    }
   }
 
   const columns: ColumnsType<SipTrunk> = [
     { title: 'Nome', dataIndex: 'name', key: 'name' },
     { title: 'Operadora', dataIndex: 'provider', key: 'provider' },
     { title: 'Host', dataIndex: 'host', key: 'host' },
+    { title: 'Canais', dataIndex: 'channels', key: 'channels' },
     {
-      title: 'Canais',
-      dataIndex: 'channels',
-      key: 'channels',
-      render: (value: number) => <Tag>{value} canais</Tag>,
-    },
-    {
-      title: 'Latencia',
+      title: 'Latência',
       dataIndex: 'latency',
       key: 'latency',
-      render: (value: number) => (
-        <Tag color={value > 100 ? 'warning' : 'success'}>{value} ms</Tag>
-      ),
+      render: (value: number) => <Tag>{value} ms</Tag>,
     },
     {
       title: 'Registro',
@@ -109,35 +113,41 @@ export default function SipTrunks() {
       render: (_, record) => <StatusTag status={record.status} />,
     },
     {
+      title: 'Sincronização',
+      dataIndex: 'syncStatus',
+      key: 'syncStatus',
+      render: (status: string) => (
+        <Tag color={status === 'synced' ? 'success' : 'warning'}>
+          {status ?? 'pending'}
+        </Tag>
+      ),
+    },
+    {
       title: 'Ações',
       key: 'actions',
-      width: 80,
-      render: (_, trunk) => (
-        <Space>
-          <Button
-            aria-label={`Editar tronco ${trunk.name}`}
-            title={`Editar tronco ${trunk.name}`}
-            icon={<EditOutlined />}
-            onClick={() => openEdit(trunk)}
-            size="small"
-          />
-          <Popconfirm
-            cancelText="Cancelar"
-            okButtonProps={{ danger: true }}
-            okText="Apagar"
-            onConfirm={() => removeTrunk(trunk)}
-            title={`Apagar o tronco ${trunk.name}?`}
-          >
+      render: (_, trunk) =>
+        canManage ? (
+          <Space>
             <Button
-              aria-label={`Apagar tronco ${trunk.name}`}
-              title={`Apagar tronco ${trunk.name}`}
-              danger
-              icon={<DeleteOutlined />}
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditing(trunk);
+                form.setFieldsValue(trunk);
+                setModalOpen(true);
+              }}
               size="small"
             />
-          </Popconfirm>
-        </Space>
-      ),
+            <Popconfirm
+              cancelText="Cancelar"
+              okButtonProps={{ danger: true }}
+              okText="Apagar"
+              onConfirm={() => void remove(trunk)}
+              title={`Apagar o tronco ${trunk.name}?`}
+            >
+              <Button danger icon={<DeleteOutlined />} size="small" />
+            </Popconfirm>
+          </Space>
+        ) : null,
     },
   ];
 
@@ -146,88 +156,79 @@ export default function SipTrunks() {
       {contextHolder}
       <PageHeader
         actions={
-          <>
-            <Button
-              icon={<ThunderboltOutlined />}
-              onClick={() => messageApi.success('Teste de registro concluido.')}
-            >
-              Testar registro
-            </Button>
-            <Button icon={<PlusOutlined />} onClick={openCreate} type="primary">
-              Novo tronco
-            </Button>
-          </>
+          canManage ? (
+            <>
+              <Button
+                icon={<SyncOutlined />}
+                loading={syncing}
+                onClick={() => void synchronize()}
+              >
+                Sincronizar
+              </Button>
+              <Button
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setEditing(null);
+                  form.setFieldsValue({
+                    channels: 10,
+                    status: 'warning',
+                  });
+                  setModalOpen(true);
+                }}
+                type="primary"
+              >
+                Novo tronco
+              </Button>
+            </>
+          ) : undefined
         }
         kicker="Conectividade SIP"
         title="Troncos SIP"
-        description="Monitore registros, capacidade de canais, latência e provedores usados pelas rotas."
+        description="Troncos do tenant e estado observado pelo FusionPBX."
       />
-
-      <Row gutter={[16, 16]}>
-        {items.map((trunk) => (
-          <Col key={trunk.id} xs={24} lg={8}>
-            <Card className="soft-panel" title={trunk.name}>
-              <Descriptions column={1} size="small">
-                <Descriptions.Item label="Operadora">
-                  {trunk.provider}
-                </Descriptions.Item>
-                <Descriptions.Item label="Host">{trunk.host}</Descriptions.Item>
-                <Descriptions.Item label="Status">
-                  <StatusTag status={trunk.status} />
-                </Descriptions.Item>
-              </Descriptions>
-              <Progress
-                percent={Math.min(100, Math.round((trunk.latency / 160) * 100))}
-                showInfo={false}
-                status={trunk.latency > 100 ? 'exception' : 'success'}
-                style={{ marginTop: 16 }}
-              />
-            </Card>
-          </Col>
-        ))}
-      </Row>
-
-      <Card className="soft-panel" style={{ marginTop: 16 }} title="Inventário de troncos">
-        <Table columns={columns} dataSource={items} pagination={false} rowKey="id" />
+      <Card className="soft-panel">
+        <Table
+          columns={columns}
+          dataSource={items}
+          loading={loading}
+          pagination={false}
+          rowKey="id"
+        />
       </Card>
       <Modal
         footer={null}
-        onCancel={closeModal}
+        onCancel={() => setModalOpen(false)}
         open={modalOpen}
         title={editing ? 'Editar tronco' : 'Novo tronco'}
       >
-        <Form form={form} layout="vertical" onFinish={saveTrunk}>
-          <Form.Item hidden name="tenantId">
-            <Input />
-          </Form.Item>
+        <Form form={form} layout="vertical" onFinish={save}>
           <Form.Item label="Nome" name="name" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="Operadora" name="provider" rules={[{ required: true }]}>
+          <Form.Item
+            label="Operadora"
+            name="provider"
+            rules={[{ required: true }]}
+          >
             <Input />
           </Form.Item>
           <Form.Item label="Host" name="host" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="Canais" name="channels" rules={[{ required: true }]}>
+          <Form.Item
+            label="Canais"
+            name="channels"
+            rules={[{ required: true }]}
+          >
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="Latencia" name="latency" rules={[{ required: true }]}>
-            <InputNumber addonAfter="ms" min={0} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item label="Status" name="status" rules={[{ required: true }]}>
-            <Select
-              options={[
-                { label: 'Registrado', value: 'registered' },
-                { label: 'Falha', value: 'failed' },
-                { label: 'Atenção', value: 'warning' },
-              ]}
-            />
+          <Form.Item hidden name="status">
+            <Input />
           </Form.Item>
           <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
-            <Button onClick={closeModal}>Cancelar</Button>
+            <Button onClick={() => setModalOpen(false)}>Cancelar</Button>
             <Button htmlType="submit" type="primary">
-              {editing ? 'Salvar tronco' : 'Criar tronco'}
+              Salvar
             </Button>
           </Space>
         </Form>
@@ -235,4 +236,3 @@ export default function SipTrunks() {
     </>
   );
 }
-

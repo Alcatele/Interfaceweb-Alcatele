@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:api": "npm --prefix backend run build",
+    "build:all": "npm run build && npm run build:api",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -18,7 +20,8 @@
     "react": "^19.0.0",
     "react-apexcharts": "^1.7.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.1.1"
+    "react-router-dom": "^7.1.1",
+    "sip.js": "^0.21.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

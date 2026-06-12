@@ -1,173 +1,120 @@
-﻿import {
+import {
   BankOutlined,
   DeleteOutlined,
-  EditOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
 import {
   Button,
   Card,
-  Col,
   Form,
   Input,
-  InputNumber,
   Modal,
   Popconfirm,
-  Row,
-  Select,
   Space,
-  Statistic,
   Switch,
   Table,
   Tag,
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
-import {
-  createMockTenant,
-  createDefaultTenantResources,
-  deleteMockTenant,
-  listMockTenants,
-  tenantResourceCatalog,
-  updateMockTenant,
-  updateMockTenantStatus,
-  type CreateTenantInput,
-  type MockTenant,
-  type TenantResource,
-} from '../services/mockTenants';
+import { useAuth } from '../contexts/useAuth';
+import { mvpApi, type SessionTenant } from '../services/mvpApi';
 
-const defaultResources = createDefaultTenantResources(40);
-
-function resourceLabel(resource: TenantResource) {
-  const catalogItem = tenantResourceCatalog.find(
-    (item) => item.key === resource.key,
-  );
-
-  return catalogItem
-    ? `${catalogItem.label}: ${resource.quantity} ${catalogItem.unit}`
-    : `${resource.key}: ${resource.quantity}`;
-}
+type TenantFormValues = {
+  name: string;
+  slug: string;
+  domain: string;
+};
 
 export default function Tenants() {
-  const [form] = Form.useForm<CreateTenantInput>();
-  const [items, setItems] = useState(listMockTenants);
+  const [form] = Form.useForm<TenantFormValues>();
+  const { activeTenant, refreshSession } = useAuth();
+  const [items, setItems] = useState<SessionTenant[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingTenant, setEditingTenant] = useState<MockTenant | null>(null);
+  const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
 
-  function refresh() {
-    setItems(listMockTenants());
-  }
-
-  function createTenant(values: CreateTenantInput) {
-    if (editingTenant) {
-      const result = updateMockTenant(editingTenant.id, values);
-
-      if (!result.success) {
-        messageApi.error(result.error);
-        return;
-      }
-
-      messageApi.success(`Empresa ${values.name} atualizada.`);
-      closeModal();
-      refresh();
-      return;
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await mvpApi.listTenants());
+    } catch {
+      messageApi.error('Não foi possível carregar as empresas.');
+    } finally {
+      setLoading(false);
     }
+  }, [messageApi]);
 
-    const result = createMockTenant(values);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-    if (!result.success) {
-      messageApi.error(result.error);
-      return;
+  async function createTenant(values: TenantFormValues) {
+    try {
+      await mvpApi.createTenant(values);
+      messageApi.success(`Empresa ${values.name} criada.`);
+      form.resetFields();
+      setModalOpen(false);
+      await refreshSession();
+      await load();
+    } catch {
+      messageApi.error('Slug ou domínio já está em uso.');
     }
-
-    messageApi.success(`Empresa ${values.name} criada.`);
-    closeModal();
-    refresh();
   }
 
-  function openCreate() {
-    setEditingTenant(null);
-    form.setFieldsValue({
-      extensionLimit: 40,
-      plan: 'Business',
-      resources: defaultResources,
-    });
-    setModalOpen(true);
-  }
-
-  function openEdit(tenant: MockTenant) {
-    setEditingTenant(tenant);
-    form.setFieldsValue(tenant);
-    setModalOpen(true);
-  }
-
-  function closeModal() {
-    form.resetFields();
-    setEditingTenant(null);
-    setModalOpen(false);
-  }
-
-  function removeTenant(tenant: MockTenant) {
-    if (!deleteMockTenant(tenant.id)) {
-      messageApi.error('Não foi possível apagar a empresa.');
-      return;
+  async function toggleStatus(tenant: SessionTenant, checked: boolean) {
+    try {
+      await mvpApi.setTenantStatus(
+        tenant.id,
+        checked ? 'active' : 'suspended',
+      );
+      messageApi.success('Status atualizado.');
+      await load();
+    } catch {
+      messageApi.error('Não foi possível alterar o status.');
     }
-
-    messageApi.success(`Empresa ${tenant.name} apagada.`);
-    refresh();
   }
 
-  function toggleStatus(tenant: MockTenant, active: boolean) {
-    updateMockTenantStatus(tenant.id, active ? 'active' : 'suspended');
-    refresh();
+  async function closeTenant(tenant: SessionTenant) {
+    try {
+      await mvpApi.closeTenant(tenant.id);
+      messageApi.success(`Empresa ${tenant.name} encerrada.`);
+      await refreshSession();
+      await load();
+    } catch {
+      messageApi.error('Não foi possível encerrar a empresa.');
+    }
   }
 
-  const columns: ColumnsType<MockTenant> = [
+  const columns: ColumnsType<SessionTenant> = [
     {
       title: 'Empresa',
       dataIndex: 'name',
       key: 'name',
-      render: (name: string) => (
-        <Tag color="blue" icon={<BankOutlined />}>
-          {name}
-        </Tag>
-      ),
-    },
-    { title: 'CNPJ / Documento', dataIndex: 'document', key: 'document' },
-    { title: 'Dominio', dataIndex: 'domain', key: 'domain' },
-    { title: 'Plano', dataIndex: 'plan', key: 'plan' },
-    {
-      title: 'Entregaveis',
-      dataIndex: 'resources',
-      key: 'resources',
-      render: (resources: TenantResource[]) => (
-        <Space size={[4, 4]} wrap>
-          {resources
-            .filter((resource) => resource.enabled)
-            .slice(0, 5)
-            .map((resource) => (
-              <Tag key={resource.key}>{resourceLabel(resource)}</Tag>
-            ))}
-          {resources.filter((resource) => resource.enabled).length > 5 ? (
-            <Tag>
-              +{resources.filter((resource) => resource.enabled).length - 5}
-            </Tag>
+      render: (name: string, tenant) => (
+        <Space>
+          <Tag color="blue" icon={<BankOutlined />}>
+            {name}
+          </Tag>
+          {tenant.id === activeTenant?.id ? (
+            <Tag color="success">Ativa na sessão</Tag>
           ) : null}
         </Space>
       ),
     },
-    { title: 'Criada em', dataIndex: 'createdAt', key: 'createdAt' },
+    { title: 'Slug', dataIndex: 'slug', key: 'slug' },
+    { title: 'Domínio SIP', dataIndex: 'domain', key: 'domain' },
+    { title: 'Perfil', dataIndex: 'role', key: 'role' },
     {
-      title: 'Ativa',
-      dataIndex: 'status',
+      title: 'Habilitada',
       key: 'status',
-      render: (status: MockTenant['status'], tenant) => (
+      render: (_, tenant) => (
         <Switch
-          checked={status === 'active'}
-          onChange={(checked) => toggleStatus(tenant, checked)}
+          checked={tenant.status !== 'suspended'}
+          disabled={tenant.id === activeTenant?.id}
+          onChange={(checked) => void toggleStatus(tenant, checked)}
         />
       ),
     },
@@ -176,42 +123,24 @@ export default function Tenants() {
       key: 'actions',
       width: 80,
       render: (_, tenant) => (
-        <Space>
+        <Popconfirm
+          cancelText="Cancelar"
+          disabled={tenant.id === activeTenant?.id}
+          okButtonProps={{ danger: true }}
+          okText="Encerrar"
+          onConfirm={() => void closeTenant(tenant)}
+          title={`Encerrar a empresa ${tenant.name}?`}
+        >
           <Button
-            aria-label={`Editar empresa ${tenant.name}`}
-            title={`Editar empresa ${tenant.name}`}
-            icon={<EditOutlined />}
-            onClick={() => openEdit(tenant)}
+            danger
+            disabled={tenant.id === activeTenant?.id}
+            icon={<DeleteOutlined />}
             size="small"
           />
-          <Popconfirm
-            cancelText="Cancelar"
-            okButtonProps={{ danger: true }}
-            okText="Apagar"
-            onConfirm={() => removeTenant(tenant)}
-            title={`Apagar a empresa ${tenant.name}?`}
-          >
-            <Button
-              aria-label={`Apagar empresa ${tenant.name}`}
-              title={`Apagar empresa ${tenant.name}`}
-              danger
-              icon={<DeleteOutlined />}
-              size="small"
-            />
-          </Popconfirm>
-        </Space>
+        </Popconfirm>
       ),
     },
   ];
-
-  const activeTenants = items.filter((tenant) => tenant.status === 'active').length;
-  const extensionCapacity = items.reduce(
-    (total, tenant) =>
-      total +
-      (tenant.resources.find((resource) => resource.key === 'extensions')
-        ?.quantity ?? tenant.extensionLimit),
-    0,
-  );
 
   return (
     <>
@@ -220,158 +149,67 @@ export default function Tenants() {
         actions={
           <Button
             icon={<PlusOutlined />}
-            onClick={openCreate}
+            onClick={() => setModalOpen(true)}
             type="primary"
           >
             Nova empresa
           </Button>
         }
-        description="Crie e administre empresas, domínios, planos e capacidade contratada da plataforma."
-        kicker="Gestão multi-tenant"
+        kicker="Multiempresa"
         title="Empresas"
+        description="Cadastre tenants e alterne a empresa ativa pelo seletor no topo."
       />
-      <Row gutter={[16, 16]}>
-        <Col xs={24} md={8}>
-          <Card className="soft-panel">
-            <Statistic title="Empresas cadastradas" value={items.length} />
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card className="soft-panel">
-            <Statistic title="Empresas ativas" value={activeTenants} />
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card className="soft-panel">
-            <Statistic title="Capacidade de ramais" value={extensionCapacity} />
-          </Card>
-        </Col>
-      </Row>
-      <Card className="soft-panel" style={{ marginTop: 16 }}>
+      <Card className="soft-panel">
         <Table
           columns={columns}
           dataSource={items}
+          loading={loading}
           pagination={false}
           rowKey="id"
-          scroll={{ x: 1050 }}
         />
       </Card>
-
       <Modal
         footer={null}
-        onCancel={closeModal}
+        onCancel={() => setModalOpen(false)}
         open={modalOpen}
-        title={editingTenant ? 'Editar empresa' : 'Nova empresa'}
+        title="Nova empresa"
       >
-        <Form
-          form={form}
-          initialValues={{
-            extensionLimit: 40,
-            plan: 'Business',
-            resources: defaultResources,
-          }}
-          layout="vertical"
-          onFinish={createTenant}
-          requiredMark={false}
-        >
+        <Form form={form} layout="vertical" onFinish={createTenant}>
           <Form.Item
-            label="Razao social / Nome"
+            label="Nome"
             name="name"
-            rules={[{ required: true, message: 'Informe o nome da empresa.' }]}
+            rules={[{ required: true, message: 'Informe o nome.' }]}
           >
             <Input />
           </Form.Item>
           <Form.Item
-            label="CNPJ / Documento"
-            name="document"
-            rules={[{ required: true, message: 'Informe o documento.' }]}
+            label="Slug"
+            name="slug"
+            rules={[
+              { required: true, message: 'Informe o slug.' },
+              {
+                pattern: /^[a-z0-9][a-z0-9-]{1,62}$/,
+                message: 'Use letras minúsculas, números e hífen.',
+              },
+            ]}
           >
-            <Input />
+            <Input placeholder="empresa-exemplo" />
           </Form.Item>
           <Form.Item
-            label="Dominio SIP"
+            label="Domínio SIP"
             name="domain"
             rules={[{ required: true, message: 'Informe o domínio.' }]}
           >
-            <Input placeholder="empresa.alcatele.cloud" />
+            <Input placeholder="pbx.empresa.com.br" />
           </Form.Item>
-          <Row gutter={16}>
-            <Col xs={24} md={12}>
-              <Form.Item label="Plano" name="plan" rules={[{ required: true }]}>
-                <Select
-                  options={[
-                    { label: 'Start', value: 'Start' },
-                    { label: 'Business', value: 'Business' },
-                    { label: 'Enterprise', value: 'Enterprise' },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item
-                label="Limite de ramais"
-                name="extensionLimit"
-                rules={[{ required: true }]}
-              >
-                <InputNumber min={1} max={10000} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Card size="small" title="O que será entregue">
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              {tenantResourceCatalog.map((resource, index) => (
-                <Row align="middle" gutter={12} key={resource.key}>
-                  <Col xs={24} md={9}>
-                    <Form.Item
-                      name={['resources', index, 'enabled']}
-                      style={{ marginBottom: 0 }}
-                      valuePropName="checked"
-                    >
-                      <Switch />
-                    </Form.Item>
-                    <Form.Item
-                      hidden
-                      initialValue={resource.key}
-                      name={['resources', index, 'key']}
-                    >
-                      <Input />
-                    </Form.Item>
-                    <span style={{ marginLeft: 8 }}>{resource.label}</span>
-                  </Col>
-                  <Col xs={16} md={9}>
-                    <Form.Item
-                      name={['resources', index, 'quantity']}
-                      rules={[
-                        {
-                          required: true,
-                          message: 'Informe a quantidade.',
-                        },
-                      ]}
-                      style={{ marginBottom: 0 }}
-                    >
-                      <InputNumber min={0} max={100000} style={{ width: '100%' }} />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={8} md={6}>
-                    <Tag>{resource.unit}</Tag>
-                  </Col>
-                </Row>
-              ))}
-            </Space>
-          </Card>
-          <Row gutter={12} justify="end">
-            <Col>
-              <Button onClick={closeModal}>Cancelar</Button>
-            </Col>
-            <Col>
-              <Button htmlType="submit" type="primary">
-                {editingTenant ? 'Salvar empresa' : 'Criar empresa'}
-              </Button>
-            </Col>
-          </Row>
+          <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
+            <Button onClick={() => setModalOpen(false)}>Cancelar</Button>
+            <Button htmlType="submit" type="primary">
+              Criar empresa
+            </Button>
+          </Space>
         </Form>
       </Modal>
     </>
   );
 }
-

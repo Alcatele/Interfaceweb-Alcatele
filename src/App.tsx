@@ -1,4 +1,4 @@
-import { ConfigProvider, theme } from 'antd';
+import { ConfigProvider, Spin, theme } from 'antd';
 import ptBR from 'antd/locale/pt_BR';
 import { useEffect, useMemo, useState } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
@@ -30,7 +30,15 @@ function AppContent({
   themeMode: ThemeMode;
   onThemeChange: (theme: ThemeMode) => void;
 }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <main className="login-screen">
+        <Spin size="large" />
+      </main>
+    );
+  }
 
   if (!isAuthenticated) {
     return <Login />;
