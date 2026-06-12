@@ -115,5 +115,8 @@ cp .env.production.example .env.production
 bash deploy/deploy.sh
 ```
 
+No primeiro deploy, o script inicia os servicos internos, troca as senhas seed e
+somente depois publica o HTTPS.
+
 O arquivo `docker-compose.prod.yml` mantem PostgreSQL e API em rede privada e
 publica somente Caddy nas portas `80` e `443`.

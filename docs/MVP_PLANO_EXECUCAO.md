@@ -266,6 +266,9 @@ cp .env.production.example .env.production
 bash deploy/deploy.sh
 ```
 
+No primeiro deploy, as senhas seed sao rotacionadas antes de o proxy HTTPS ser
+iniciado.
+
 Na VPS de homologacao, somente as portas `22`, `80` e `443` devem ficar
 publicas. O arquivo `.env.production` nunca deve ser versionado.
 

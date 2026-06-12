@@ -3,6 +3,7 @@ set -euo pipefail
 
 project_dir="${PROJECT_DIR:-/opt/alcatele-panel}"
 environment_file="${ENV_FILE:-${project_dir}/.env.production}"
+credentials_file="${CREDENTIALS_FILE:-/root/alcatele-panel-initial-credentials.txt}"
 
 cd "$project_dir"
 
@@ -14,7 +15,17 @@ fi
 docker compose \
   --env-file "$environment_file" \
   -f docker-compose.prod.yml \
-  up -d --build --remove-orphans
+  up -d --build postgres api web
+
+if [[ ! -f "$credentials_file" ]]; then
+  CREDENTIALS_FILE="$credentials_file" \
+    bash deploy/rotate-seed-passwords.sh
+fi
+
+docker compose \
+  --env-file "$environment_file" \
+  -f docker-compose.prod.yml \
+  up -d caddy --remove-orphans
 
 docker compose \
   --env-file "$environment_file" \
