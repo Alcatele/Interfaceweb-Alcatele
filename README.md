@@ -106,3 +106,14 @@ Antes de publicar:
 - configurar o bridge privado do FusionPBX;
 - trocar usuarios e senhas seed;
 - validar backup, restore, logs e isolamento RLS.
+
+Para Debian 12, a configuracao de homologacao utiliza:
+
+```bash
+sudo bash deploy/bootstrap-debian12.sh
+cp .env.production.example .env.production
+bash deploy/deploy.sh
+```
+
+O arquivo `docker-compose.prod.yml` mantem PostgreSQL e API em rede privada e
+publica somente Caddy nas portas `80` e `443`.

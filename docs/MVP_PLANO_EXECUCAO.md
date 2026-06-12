@@ -254,6 +254,21 @@ Interface:
 http://localhost:8080
 ```
 
+### Homologacao Debian 12
+
+Para uma VPS pequena, utilize `docker-compose.prod.yml`. O ambiente inclui
+Caddy com HTTPS automatico, PostgreSQL sem porta publica, API interna,
+healthchecks e limites de memoria.
+
+```bash
+bash deploy/bootstrap-debian12.sh
+cp .env.production.example .env.production
+bash deploy/deploy.sh
+```
+
+Na VPS de homologacao, somente as portas `22`, `80` e `443` devem ficar
+publicas. O arquivo `.env.production` nunca deve ser versionado.
+
 Acessos locais:
 
 | Login | Senha |
