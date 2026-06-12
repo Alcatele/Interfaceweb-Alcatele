@@ -1,180 +1,216 @@
-﻿import {
-  CheckCircleOutlined,
+import {
   DeleteOutlined,
-  DownloadOutlined,
+  EditOutlined,
   MailOutlined,
-  PauseCircleOutlined,
-  PhoneOutlined,
-  PlayCircleOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
-import { Button, Card, Popconfirm, Space, Table, Tag, Typography, message } from 'antd';
+import {
+  Button,
+  Card,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Space,
+  Switch,
+  Table,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import { useAuth } from '../contexts/useAuth';
+import { getApiErrorMessage } from '../services/api';
+import {
+  mvpApi,
+  type TenantResources,
+  type VoicemailBox,
+} from '../services/mvpApi';
 
-type VoicemailMessage = {
-  id: string;
-  caller: string;
+type VoicemailBoxForm = {
   mailbox: string;
-  receivedAt: string;
-  duration: string;
-  status: 'new' | 'read';
-  transcription: string;
+  name: string;
+  notificationEmail?: string;
+  transcriptionEnabled: boolean;
+  enabled: boolean;
 };
 
-const initialMessages: VoicemailMessage[] = [
-  {
-    id: 'vm-1',
-    caller: '+55 11 98888-1212',
-    mailbox: '1001',
-    receivedAt: 'Hoje, 09:14',
-    duration: '0m42s',
-    status: 'new',
-    transcription: 'Cliente solicitou retorno sobre o orçamento enviado.',
-  },
-  {
-    id: 'vm-2',
-    caller: '1005 - Marina Costa',
-    mailbox: '1002',
-    receivedAt: 'Hoje, 08:51',
-    duration: '1m18s',
-    status: 'read',
-    transcription: 'Mensagem interna sobre ajuste de escala da fila comercial.',
-  },
-  {
-    id: 'vm-3',
-    caller: '+55 31 97777-2323',
-    mailbox: '1003',
-    receivedAt: 'Ontem, 17:26',
-    duration: '0m55s',
-    status: 'new',
-    transcription: 'Pedido de confirmação do horário de atendimento.',
-  },
-  {
-    id: 'vm-4',
-    caller: '+55 21 96666-4545',
-    mailbox: '1005',
-    receivedAt: 'Ontem, 14:08',
-    duration: '2m03s',
-    status: 'read',
-    transcription: 'Fornecedor deixou atualização sobre o chamado técnico.',
-  },
-];
-
 export default function Voicemail() {
-  const { currentUser, role } = useAuth();
-  const [messages, setMessages] = useState<VoicemailMessage[]>(initialMessages);
-  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [form] = Form.useForm<VoicemailBoxForm>();
+  const [items, setItems] = useState<VoicemailBox[]>([]);
+  const [resources, setResources] = useState<TenantResources | null>(null);
+  const [editing, setEditing] = useState<VoicemailBox | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
-  const canViewAll = ['super_admin', 'admin', 'supervisor'].includes(role);
+  const { activeTenant, hasPermission } = useAuth();
+  const canManage = hasPermission('pbx.configure');
+  const limit = resources?.limits.voicemailBoxes ?? 0;
+  const used = resources?.usage.voicemailBoxes ?? items.length;
+  const limitReached = used >= limit;
 
-  const visibleMessages = useMemo(() => {
-    if (canViewAll) {
-      return messages;
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [boxes, nextResources] = await Promise.all([
+        mvpApi.listVoicemailBoxes(),
+        mvpApi.tenantResources(),
+      ]);
+      setItems(boxes);
+      setResources(nextResources);
+    } catch (error) {
+      messageApi.error(
+        getApiErrorMessage(
+          error,
+          'Não foi possível carregar as caixas postais.',
+        ),
+      );
+    } finally {
+      setLoading(false);
     }
+  }, [messageApi]);
 
-    return messages.filter((item) => item.mailbox === currentUser?.extension);
-  }, [canViewAll, currentUser?.extension, messages]);
+  useEffect(() => {
+    void load();
+  }, [activeTenant?.id, load]);
 
-  function toggleRead(messageId: string) {
-    setMessages((items) =>
-      items.map((item) =>
-        item.id === messageId
-          ? { ...item, status: item.status === 'new' ? 'read' : 'new' }
-          : item,
-      ),
-    );
+  function openCreate() {
+    setEditing(null);
+    form.setFieldsValue({
+      enabled: true,
+      transcriptionEnabled: false,
+    });
+    setModalOpen(true);
   }
 
-  function deleteMessage(messageId: string) {
-    setMessages((items) => items.filter((item) => item.id !== messageId));
-    messageApi.success('Mensagem apagada.');
+  function openEdit(box: VoicemailBox) {
+    setEditing(box);
+    form.setFieldsValue({
+      ...box,
+      notificationEmail: box.notificationEmail ?? undefined,
+    });
+    setModalOpen(true);
   }
 
-  function downloadMessage(messageItem: VoicemailMessage) {
-    messageApi.success(`Mensagem ${messageItem.id} preparada para download.`);
+  function closeModal() {
+    form.resetFields();
+    setEditing(null);
+    setModalOpen(false);
   }
 
-  function returnCall(messageItem: VoicemailMessage) {
-    messageApi.success(`Retornando chamada para ${messageItem.caller}.`);
+  async function save(values: VoicemailBoxForm) {
+    const input = {
+      ...values,
+      notificationEmail: values.notificationEmail?.trim() || null,
+    };
+
+    try {
+      if (editing) {
+        await mvpApi.updateVoicemailBox(editing.id, input);
+      } else {
+        await mvpApi.createVoicemailBox(input);
+      }
+      messageApi.success('Caixa postal enviada para provisionamento.');
+      closeModal();
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
+    }
   }
 
-  const columns: ColumnsType<VoicemailMessage> = [
+  async function removeBox(box: VoicemailBox) {
+    try {
+      await mvpApi.removeVoicemailBox(box.id);
+      messageApi.success(`Caixa postal ${box.mailbox} removida.`);
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
+    }
+  }
+
+  async function toggleBox(box: VoicemailBox, enabled: boolean) {
+    try {
+      await mvpApi.updateVoicemailBox(box.id, { ...box, enabled });
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
+    }
+  }
+
+  const columns: ColumnsType<VoicemailBox> = [
     {
-      title: 'Status',
-      dataIndex: 'status',
-      key: 'status',
-      render: (status: VoicemailMessage['status']) => (
-        <Tag color={status === 'new' ? 'processing' : 'default'}>
-          {status === 'new' ? 'Nova' : 'Lida'}
+      title: 'Caixa postal',
+      dataIndex: 'mailbox',
+      key: 'mailbox',
+      render: (mailbox: string) => (
+        <Tag color="blue" icon={<MailOutlined />}>
+          {mailbox}
         </Tag>
       ),
     },
-    { title: 'Caixa postal', dataIndex: 'mailbox', key: 'mailbox' },
-    { title: 'Origem', dataIndex: 'caller', key: 'caller' },
-    { title: 'Recebida em', dataIndex: 'receivedAt', key: 'receivedAt' },
-    { title: 'Duração', dataIndex: 'duration', key: 'duration' },
+    { title: 'Nome', dataIndex: 'name', key: 'name' },
+    {
+      title: 'Notificação por e-mail',
+      dataIndex: 'notificationEmail',
+      key: 'notificationEmail',
+      render: (email: string | null) => email ?? 'Não configurado',
+    },
     {
       title: 'Transcrição',
-      dataIndex: 'transcription',
-      key: 'transcription',
-      render: (value: string) => (
-        <Typography.Text type="secondary">{value}</Typography.Text>
+      dataIndex: 'transcriptionEnabled',
+      key: 'transcriptionEnabled',
+      render: (enabled: boolean) => (
+        <Tag color={enabled ? 'processing' : 'default'}>
+          {enabled ? 'Habilitada' : 'Desabilitada'}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Sincronização',
+      dataIndex: 'syncStatus',
+      key: 'syncStatus',
+      render: (status: VoicemailBox['syncStatus']) => (
+        <Tag color={status === 'synced' ? 'success' : 'warning'}>{status}</Tag>
+      ),
+    },
+    {
+      title: 'Ativa',
+      dataIndex: 'enabled',
+      key: 'enabled',
+      render: (enabled: boolean, box) => (
+        <Switch
+          checked={enabled}
+          disabled={!canManage}
+          onChange={(checked) => void toggleBox(box, checked)}
+        />
       ),
     },
     {
       title: 'Ações',
       key: 'actions',
-      render: (_, item) => (
-        <Space>
-          <Button
-            aria-label={
-              playingId === item.id ? 'Pausar mensagem' : 'Ouvir mensagem'
-            }
-            title={playingId === item.id ? 'Pausar mensagem' : 'Ouvir mensagem'}
-            icon={
-              playingId === item.id ? <PauseCircleOutlined /> : <PlayCircleOutlined />
-            }
-            onClick={() =>
-              setPlayingId((current) => (current === item.id ? null : item.id))
-            }
-          />
-          <Button
-            aria-label="Retornar chamada"
-            title="Retornar chamada"
-            icon={<PhoneOutlined />}
-            onClick={() => returnCall(item)}
-          />
-          <Button
-            aria-label="Baixar mensagem"
-            title="Baixar mensagem"
-            icon={<DownloadOutlined />}
-            onClick={() => downloadMessage(item)}
-          />
-          <Button
-            aria-label={
-              item.status === 'new' ? 'Marcar como lida' : 'Marcar como nova'
-            }
-            title={item.status === 'new' ? 'Marcar como lida' : 'Marcar como nova'}
-            icon={<CheckCircleOutlined />}
-            onClick={() => toggleRead(item.id)}
-          />
-          <Popconfirm
-            cancelText="Cancelar"
-            okText="Apagar"
-            onConfirm={() => deleteMessage(item.id)}
-            title="Apagar esta mensagem?"
-          >
+      width: 100,
+      render: (_, box) =>
+        canManage ? (
+          <Space>
             <Button
-              aria-label="Apagar mensagem"
-              danger
-              icon={<DeleteOutlined />}
-              title="Apagar mensagem"
+              aria-label={`Editar caixa postal ${box.mailbox}`}
+              icon={<EditOutlined />}
+              onClick={() => openEdit(box)}
+              size="small"
             />
-          </Popconfirm>
-        </Space>
-      ),
+            <Popconfirm
+              cancelText="Cancelar"
+              okButtonProps={{ danger: true }}
+              okText="Apagar"
+              onConfirm={() => void removeBox(box)}
+              title={`Apagar a caixa postal ${box.mailbox}?`}
+            >
+              <Button danger icon={<DeleteOutlined />} size="small" />
+            </Popconfirm>
+          </Space>
+        ) : null,
     },
   ];
 
@@ -183,35 +219,99 @@ export default function Voicemail() {
       {contextHolder}
       <PageHeader
         actions={
-          <Button icon={<PhoneOutlined />} type="primary">
-            Ligar para correio de voz
-          </Button>
+          <>
+            <Tag color={limitReached ? 'warning' : 'blue'}>
+              Contratado: {used}/{limit}
+            </Tag>
+            {canManage ? (
+              <Button
+                disabled={limitReached}
+                icon={<PlusOutlined />}
+                onClick={openCreate}
+                type="primary"
+              >
+                Nova caixa postal
+              </Button>
+            ) : null}
+          </>
         }
         kicker="Mensagens de voz"
         title="Correio de voz"
-        description={
-          canViewAll
-            ? 'Consulte caixas postais, ouça mensagens e retorne chamadas.'
-            : 'Consulte sua caixa postal, ouça mensagens e retorne chamadas.'
-        }
+        description="Configure caixas postais, notificações por e-mail e transcrição de mensagens."
       />
 
       <Card className="soft-panel">
         <Table
           columns={columns}
-          dataSource={visibleMessages}
+          dataSource={items}
+          loading={loading}
           locale={{
             emptyText: (
               <Space direction="vertical" align="center">
                 <MailOutlined />
-                <Typography.Text>Nenhuma mensagem de voz encontrada.</Typography.Text>
+                <Typography.Text>
+                  Nenhuma caixa postal configurada.
+                </Typography.Text>
               </Space>
             ),
           }}
-          pagination={{ pageSize: 6 }}
+          pagination={false}
           rowKey="id"
+          scroll={{ x: 980 }}
         />
       </Card>
+
+      <Modal
+        footer={null}
+        onCancel={closeModal}
+        open={modalOpen}
+        title={editing ? 'Editar caixa postal' : 'Nova caixa postal'}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={save}
+          requiredMark={false}
+        >
+          <Form.Item
+            label="Número da caixa postal"
+            name="mailbox"
+            rules={[{ required: true, message: 'Informe a caixa postal.' }]}
+          >
+            <Input placeholder="1001" />
+          </Form.Item>
+          <Form.Item
+            label="Nome"
+            name="name"
+            rules={[{ required: true, message: 'Informe o nome.' }]}
+          >
+            <Input placeholder="Caixa postal comercial" />
+          </Form.Item>
+          <Form.Item
+            label="E-mail para notificações"
+            name="notificationEmail"
+            rules={[{ type: 'email', message: 'Informe um e-mail válido.' }]}
+          >
+            <Input placeholder="usuario@empresa.com.br" />
+          </Form.Item>
+          <Form.Item
+            label="Transcrição automática"
+            name="transcriptionEnabled"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item label="Ativa" name="enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
+            <Button onClick={closeModal}>Cancelar</Button>
+            <Button htmlType="submit" type="primary">
+              Salvar caixa postal
+            </Button>
+          </Space>
+        </Form>
+      </Modal>
     </>
   );
 }

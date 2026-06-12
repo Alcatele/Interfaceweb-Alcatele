@@ -19,6 +19,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/postgresql/mvp_schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./database/postgresql/migrations/002_tenant_limits_call_groups_voicemail.sql:/docker-entrypoint-initdb.d/002-tenant-resources.sql:ro
     networks:
       - backend
 

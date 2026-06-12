@@ -7,6 +7,7 @@ import {
 import { PoolClient } from 'pg';
 import { SessionContext } from '../auth/auth.types';
 import { DatabaseService } from '../database/database.service';
+import { ResourceLimitsService } from '../database/resource-limits.service';
 
 export type CreateUserInput = {
   name: string;
@@ -19,7 +20,10 @@ export type CreateUserInput = {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly resourceLimits: ResourceLimitsService,
+  ) {}
 
   list(session: SessionContext) {
     return this.database.tenantTransaction(
@@ -59,6 +63,20 @@ export class UsersService {
         session.user.id,
         session.membershipId,
         async (client) => {
+          await this.resourceLimits.assertAvailable(
+            client,
+            session.tenant.id,
+            'users',
+          );
+
+          if (input.extension) {
+            await this.resourceLimits.assertAvailable(
+              client,
+              session.tenant.id,
+              'extensions',
+            );
+          }
+
           const roleResult = await client.query<{ id: string }>(
             `SELECT id
              FROM iam.roles
@@ -191,7 +209,7 @@ export class UsersService {
         );
 
         if (!result.rows[0]) {
-          throw new NotFoundException('UsuÃ¡rio nÃ£o encontrado.');
+          throw new NotFoundException('Usuário não encontrado.');
         }
       },
     );
@@ -242,7 +260,7 @@ export class UsersService {
     const target = result.rows[0];
 
     if (!target) {
-      throw new NotFoundException('UsuÃ¡rio nÃ£o encontrado.');
+      throw new NotFoundException('Usuário não encontrado.');
     }
 
     if (target.role === 'super_admin' && session.role !== 'super_admin') {

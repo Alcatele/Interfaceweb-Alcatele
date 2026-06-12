@@ -22,6 +22,7 @@ import { useCallback, useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import StatusTag from '../components/StatusTag';
 import { useAuth } from '../contexts/useAuth';
+import { getApiErrorMessage } from '../services/api';
 import { mvpApi } from '../services/mvpApi';
 import type { SipTrunk } from '../services/mockData';
 
@@ -68,8 +69,10 @@ export default function SipTrunks() {
       setEditing(null);
       setModalOpen(false);
       await load();
-    } catch {
-      messageApi.error('Não foi possível salvar o tronco.');
+    } catch (error) {
+      messageApi.error(
+        getApiErrorMessage(error, 'Não foi possível salvar o tronco.'),
+      );
     }
   }
 

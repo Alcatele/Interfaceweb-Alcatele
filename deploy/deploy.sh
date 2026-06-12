@@ -15,7 +15,14 @@ fi
 docker compose \
   --env-file "$environment_file" \
   -f docker-compose.prod.yml \
-  up -d --build postgres api web
+  up -d postgres
+
+bash deploy/apply-migrations.sh
+
+docker compose \
+  --env-file "$environment_file" \
+  -f docker-compose.prod.yml \
+  up -d --build api web
 
 if [[ ! -f "$credentials_file" ]]; then
   CREDENTIALS_FILE="$credentials_file" \

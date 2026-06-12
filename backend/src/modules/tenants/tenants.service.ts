@@ -1,16 +1,29 @@
-import { ConflictException, Injectable } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { SessionContext } from '../auth/auth.types';
+import { DatabaseService } from '../database/database.service';
+import {
+  ResourceLimitsService,
+  TenantLimits,
+  resourceLimitKeys,
+} from '../database/resource-limits.service';
 
 export type CreateTenantInput = {
   name: string;
   slug: string;
   domain: string;
+  limits: TenantLimits;
 };
 
 @Injectable()
 export class TenantsService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly resourceLimits: ResourceLimitsService,
+  ) {}
 
   async list(session: SessionContext) {
     if (!session.permissions.includes('tenant.manage')) {
@@ -34,16 +47,36 @@ export class TenantsService {
        ORDER BY name`,
     );
 
-    return result.rows.map((tenant) => ({
-      ...tenant,
-      active: tenant.id === session.tenant.id,
-      role:
-        session.availableTenants.find((item) => item.id === tenant.id)?.role ??
-        null,
-    }));
+    return Promise.all(
+      result.rows.map(async (tenant) => {
+        const resources = await this.database.transaction((client) =>
+          this.resourceLimits.get(client, tenant.id),
+        );
+
+        return {
+          ...tenant,
+          ...resources,
+          active: tenant.id === session.tenant.id,
+          role:
+            session.availableTenants.find((item) => item.id === tenant.id)?.role ??
+            null,
+        };
+      }),
+    );
+  }
+
+  resources(session: SessionContext) {
+    return this.database.tenantTransaction(
+      session.tenant.id,
+      session.user.id,
+      session.membershipId,
+      (client) => this.resourceLimits.get(client, session.tenant.id),
+    );
   }
 
   async create(session: SessionContext, input: CreateTenantInput) {
+    this.ensureSuperAdmin(session);
+
     try {
       return await this.database.transaction(async (client) => {
         const tenantResult = await client.query<{
@@ -60,6 +93,31 @@ export class TenantsService {
         );
         const tenant = tenantResult.rows[0];
 
+        await client.query(
+          `INSERT INTO core.tenant_limits (
+             tenant_id,
+             max_users,
+             max_extensions,
+             max_trunks,
+             max_inbound_routes,
+             max_outbound_routes,
+             max_pickup_groups,
+             max_ring_groups,
+             max_voicemail_boxes
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            tenant.id,
+            input.limits.users,
+            input.limits.extensions,
+            input.limits.trunks,
+            input.limits.inboundRoutes,
+            input.limits.outboundRoutes,
+            input.limits.pickupGroups,
+            input.limits.ringGroups,
+            input.limits.voicemailBoxes,
+          ],
+        );
         await client.query(
           `SELECT core.set_request_context($1::uuid, $2::uuid, NULL)`,
           [tenant.id, session.user.id],
@@ -86,7 +144,7 @@ export class TenantsService {
           [tenant.id, session.user.id, roleResult.rows[0].id],
         );
 
-        return tenant;
+        return { ...tenant, limits: input.limits };
       });
     } catch (error) {
       if ((error as { code?: string }).code === '23505') {
@@ -94,6 +152,53 @@ export class TenantsService {
       }
       throw error;
     }
+  }
+
+  async updateLimits(
+    session: SessionContext,
+    tenantId: string,
+    limits: TenantLimits,
+  ) {
+    this.ensureSuperAdmin(session);
+
+    return this.database.transaction(async (client) => {
+      const resources = await this.resourceLimits.get(client, tenantId);
+      const exceeded = resourceLimitKeys.find(
+        (key) => limits[key] < resources.usage[key],
+      );
+
+      if (exceeded) {
+        throw new ConflictException(
+          `O limite não pode ser menor que o uso atual (${resources.usage[exceeded]}).`,
+        );
+      }
+
+      await client.query(
+        `UPDATE core.tenant_limits
+         SET max_users = $2,
+             max_extensions = $3,
+             max_trunks = $4,
+             max_inbound_routes = $5,
+             max_outbound_routes = $6,
+             max_pickup_groups = $7,
+             max_ring_groups = $8,
+             max_voicemail_boxes = $9
+         WHERE tenant_id = $1`,
+        [
+          tenantId,
+          limits.users,
+          limits.extensions,
+          limits.trunks,
+          limits.inboundRoutes,
+          limits.outboundRoutes,
+          limits.pickupGroups,
+          limits.ringGroups,
+          limits.voicemailBoxes,
+        ],
+      );
+
+      return { limits, usage: resources.usage };
+    });
   }
 
   async setStatus(tenantId: string, status: 'active' | 'suspended') {
@@ -114,5 +219,13 @@ export class TenantsService {
        WHERE id = $1`,
       [tenantId],
     );
+  }
+
+  private ensureSuperAdmin(session: SessionContext) {
+    if (session.role !== 'super_admin') {
+      throw new ForbiddenException(
+        'Somente Super Admin pode alterar recursos contratados.',
+      );
+    }
   }
 }

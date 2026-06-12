@@ -2,10 +2,14 @@ import {
   extensions as seedExtensions,
   inboundRoutes as seedInboundRoutes,
   outboundRoutes as seedOutboundRoutes,
+  pickupGroups as seedPickupGroups,
+  ringGroups as seedRingGroups,
   sipTrunks as seedSipTrunks,
   type Extension,
   type InboundRoute,
   type OutboundRoute,
+  type PickupGroup,
+  type RingGroup,
   type SipTrunk,
 } from './mockData';
 import {
@@ -23,6 +27,9 @@ import type {
   PermissionProfile,
   SessionData,
   SessionTenant,
+  TenantLimits,
+  TenantResources,
+  VoicemailBox,
   WebphoneConfig,
 } from './mvpApi';
 
@@ -33,6 +40,17 @@ const sessionKey = 'alcatele-mvp-demo-session';
 const activeTenantKey = 'alcatele-mvp-demo-tenant';
 const tenantsKey = 'alcatele-mvp-demo-tenants';
 
+const defaultLimits: TenantLimits = {
+  users: 10,
+  extensions: 10,
+  trunks: 2,
+  inboundRoutes: 5,
+  outboundRoutes: 5,
+  pickupGroups: 3,
+  ringGroups: 3,
+  voicemailBoxes: 10,
+};
+
 const defaultTenants: SessionTenant[] = [
   {
     id: 'tenant-alcatele',
@@ -41,6 +59,7 @@ const defaultTenants: SessionTenant[] = [
     domain: 'pbx.alcatele.local',
     status: 'active',
     role: 'super_admin',
+    limits: defaultLimits,
   },
   {
     id: 'tenant-demo',
@@ -49,6 +68,7 @@ const defaultTenants: SessionTenant[] = [
     domain: 'demo.alcatele.local',
     status: 'active',
     role: 'super_admin',
+    limits: defaultLimits,
   },
 ];
 
@@ -72,6 +92,26 @@ let demoOutboundRoutes: DemoOutboundRoute[] = seedOutboundRoutes.map(
     syncStatus: 'synced',
   }),
 );
+let demoPickupGroups: PickupGroup[] = seedPickupGroups.map((item) => ({
+  ...item,
+  syncStatus: 'synced',
+}));
+let demoRingGroups: RingGroup[] = seedRingGroups.map((item) => ({
+  ...item,
+  syncStatus: 'synced',
+}));
+let demoVoicemailBoxes: VoicemailBox[] = [
+  {
+    id: 'voicemail-1001',
+    tenantId: 'tenant-alcatele',
+    mailbox: '1001',
+    name: 'Caixa postal comercial',
+    notificationEmail: 'comercial@alcatele.local',
+    transcriptionEnabled: false,
+    enabled: true,
+    syncStatus: 'synced',
+  },
+];
 let lastSyncAt: string | null = new Date().toISOString();
 
 function makeId(prefix: string) {
@@ -160,7 +200,42 @@ function pendingCount() {
     ...demoTrunks,
     ...demoInboundRoutes,
     ...demoOutboundRoutes,
+    ...demoPickupGroups,
+    ...demoRingGroups,
+    ...demoVoicemailBoxes,
   ].filter((item) => item.syncStatus === 'pending').length;
+}
+
+function resourcesFor(tenant: SessionTenant): TenantResources {
+  return {
+    limits: tenant.limits ?? defaultLimits,
+    usage: {
+      users: listPublicUsers().length,
+      extensions: demoExtensions.filter((item) => item.tenantId === tenant.id)
+        .length,
+      trunks: demoTrunks.filter((item) => item.tenantId === tenant.id).length,
+      inboundRoutes:
+        tenant.id === 'tenant-alcatele' ? demoInboundRoutes.length : 0,
+      outboundRoutes:
+        tenant.id === 'tenant-alcatele' ? demoOutboundRoutes.length : 0,
+      pickupGroups: demoPickupGroups.filter(
+        (item) => item.tenantId === tenant.id,
+      ).length,
+      ringGroups: demoRingGroups.filter((item) => item.tenantId === tenant.id)
+        .length,
+      voicemailBoxes: demoVoicemailBoxes.filter(
+        (item) => item.tenantId === tenant.id,
+      ).length,
+    },
+  };
+}
+
+function assertDemoLimit(resource: keyof TenantLimits) {
+  const resources = resourcesFor(currentTenant(requireUser()));
+
+  if (resources.usage[resource] >= resources.limits[resource]) {
+    throw new Error('Limite contratado atingido.');
+  }
 }
 
 export const demoMvpApi = {
@@ -219,11 +294,17 @@ export const demoMvpApi = {
     const active = currentTenant(user);
     return availableTenantsFor(user).map((tenant) => ({
       ...tenant,
+      ...resourcesFor(tenant),
       active: tenant.id === active.id,
     }));
   },
 
-  async createTenant(input: { name: string; slug: string; domain: string }) {
+  async createTenant(input: {
+    name: string;
+    slug: string;
+    domain: string;
+    limits: TenantLimits;
+  }) {
     const tenants = getTenants();
 
     if (
@@ -242,9 +323,22 @@ export const demoMvpApi = {
       domain: input.domain,
       status: 'active',
       role: 'super_admin',
+      limits: input.limits,
     };
     saveTenants([...tenants, tenant]);
     return tenant;
+  },
+
+  async tenantResources() {
+    return resourcesFor(currentTenant(requireUser()));
+  },
+
+  async updateTenantLimits(tenantId: string, limits: TenantLimits) {
+    saveTenants(
+      getTenants().map((tenant) =>
+        tenant.id === tenantId ? { ...tenant, limits } : tenant,
+      ),
+    );
   },
 
   async setTenantStatus(
@@ -322,6 +416,12 @@ export const demoMvpApi = {
     role: string;
     extension?: string;
   }) {
+    assertDemoLimit('users');
+
+    if (input.extension) {
+      assertDemoLimit('extensions');
+    }
+
     const result = await createMockUser({
       ...input,
       role: input.role === 'admin' ? 'admin' : 'user',
@@ -400,6 +500,18 @@ export const demoMvpApi = {
       ...item,
       syncStatus: 'synced',
     }));
+    demoPickupGroups = demoPickupGroups.map((item) => ({
+      ...item,
+      syncStatus: 'synced',
+    }));
+    demoRingGroups = demoRingGroups.map((item) => ({
+      ...item,
+      syncStatus: 'synced',
+    }));
+    demoVoicemailBoxes = demoVoicemailBoxes.map((item) => ({
+      ...item,
+      syncStatus: 'synced',
+    }));
     lastSyncAt = new Date().toISOString();
     return { synchronized: total, total };
   },
@@ -412,6 +524,7 @@ export const demoMvpApi = {
   async createExtension(
     input: Omit<Extension, 'id' | 'tenantId' | 'ip' | 'lastSeen'>,
   ) {
+    assertDemoLimit('extensions');
     const tenant = currentTenant(requireUser());
     demoExtensions.push({
       ...input,
@@ -444,6 +557,7 @@ export const demoMvpApi = {
   async createTrunk(
     input: Omit<SipTrunk, 'id' | 'tenantId' | 'latency'>,
   ) {
+    assertDemoLimit('trunks');
     const tenant = currentTenant(requireUser());
     demoTrunks.push({
       ...input,
@@ -472,6 +586,7 @@ export const demoMvpApi = {
   },
 
   async createInboundRoute(input: Omit<InboundRoute, 'id'>) {
+    assertDemoLimit('inboundRoutes');
     demoInboundRoutes.push({
       ...input,
       id: makeId('inbound'),
@@ -496,6 +611,7 @@ export const demoMvpApi = {
   async createOutboundRoute(
     input: Omit<OutboundRoute, 'id' | 'trunk'> & { trunkId: string },
   ) {
+    assertDemoLimit('outboundRoutes');
     const trunk = demoTrunks.find((item) => item.id === input.trunkId);
     demoOutboundRoutes.push({
       ...input,
@@ -524,6 +640,95 @@ export const demoMvpApi = {
 
   async removeOutboundRoute(id: string) {
     demoOutboundRoutes = demoOutboundRoutes.filter((item) => item.id !== id);
+  },
+
+  async listPickupGroups() {
+    const tenant = currentTenant(requireUser());
+    return demoPickupGroups.filter((item) => item.tenantId === tenant.id);
+  },
+
+  async createPickupGroup(input: Omit<PickupGroup, 'id' | 'tenantId'>) {
+    assertDemoLimit('pickupGroups');
+    const tenant = currentTenant(requireUser());
+    demoPickupGroups.push({
+      ...input,
+      id: makeId('pickup'),
+      tenantId: tenant.id,
+      syncStatus: 'pending',
+    });
+  },
+
+  async updatePickupGroup(
+    id: string,
+    input: Omit<PickupGroup, 'id' | 'tenantId'>,
+  ) {
+    demoPickupGroups = demoPickupGroups.map((item) =>
+      item.id === id ? { ...item, ...input, syncStatus: 'pending' } : item,
+    );
+  },
+
+  async removePickupGroup(id: string) {
+    demoPickupGroups = demoPickupGroups.filter((item) => item.id !== id);
+  },
+
+  async listRingGroups() {
+    const tenant = currentTenant(requireUser());
+    return demoRingGroups.filter((item) => item.tenantId === tenant.id);
+  },
+
+  async createRingGroup(input: Omit<RingGroup, 'id' | 'tenantId'>) {
+    assertDemoLimit('ringGroups');
+    const tenant = currentTenant(requireUser());
+    demoRingGroups.push({
+      ...input,
+      id: makeId('ring'),
+      tenantId: tenant.id,
+      syncStatus: 'pending',
+    });
+  },
+
+  async updateRingGroup(
+    id: string,
+    input: Omit<RingGroup, 'id' | 'tenantId'>,
+  ) {
+    demoRingGroups = demoRingGroups.map((item) =>
+      item.id === id ? { ...item, ...input, syncStatus: 'pending' } : item,
+    );
+  },
+
+  async removeRingGroup(id: string) {
+    demoRingGroups = demoRingGroups.filter((item) => item.id !== id);
+  },
+
+  async listVoicemailBoxes() {
+    const tenant = currentTenant(requireUser());
+    return demoVoicemailBoxes.filter((item) => item.tenantId === tenant.id);
+  },
+
+  async createVoicemailBox(
+    input: Omit<VoicemailBox, 'id' | 'tenantId' | 'syncStatus'>,
+  ) {
+    assertDemoLimit('voicemailBoxes');
+    const tenant = currentTenant(requireUser());
+    demoVoicemailBoxes.push({
+      ...input,
+      id: makeId('voicemail'),
+      tenantId: tenant.id,
+      syncStatus: 'pending',
+    });
+  },
+
+  async updateVoicemailBox(
+    id: string,
+    input: Omit<VoicemailBox, 'id' | 'tenantId' | 'syncStatus'>,
+  ) {
+    demoVoicemailBoxes = demoVoicemailBoxes.map((item) =>
+      item.id === id ? { ...item, ...input, syncStatus: 'pending' } : item,
+    );
+  },
+
+  async removeVoicemailBox(id: string) {
+    demoVoicemailBoxes = demoVoicemailBoxes.filter((item) => item.id !== id);
   },
 
   async webphoneConfig(): Promise<WebphoneConfig> {

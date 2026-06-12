@@ -19,6 +19,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../contexts/useAuth';
+import { getApiErrorMessage } from '../services/api';
 import { mvpApi, type ApiUser } from '../services/mvpApi';
 
 type CreateUserForm = {
@@ -66,8 +67,13 @@ export default function UserManagementPanel() {
       createForm.resetFields();
       setCreateOpen(false);
       await load();
-    } catch {
-      messageApi.error('Usuário, e-mail ou ramal já cadastrado.');
+    } catch (error) {
+      messageApi.error(
+        getApiErrorMessage(
+          error,
+          'Usuário, e-mail ou ramal já cadastrado.',
+        ),
+      );
     }
   }
 

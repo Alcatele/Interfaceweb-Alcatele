@@ -89,6 +89,7 @@ export type PickupGroup = {
   code: string;
   members: string[];
   enabled: boolean;
+  syncStatus?: 'pending' | 'synced' | 'failed';
 };
 
 export type RingGroup = {
@@ -101,6 +102,7 @@ export type RingGroup = {
   members: string[];
   fallback: string;
   enabled: boolean;
+  syncStatus?: 'pending' | 'synced' | 'failed';
 };
 
 export type CallRecord = {

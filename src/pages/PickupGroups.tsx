@@ -1,4 +1,4 @@
-﻿import {
+import {
   DeleteOutlined,
   EditOutlined,
   PlusOutlined,
@@ -19,34 +19,60 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import PageHeader from '../components/PageHeader';
 import { useAuth } from '../contexts/useAuth';
-import {
-  extensions,
-  pickupGroups,
-  type PickupGroup,
-} from '../services/mockData';
+import { getApiErrorMessage } from '../services/api';
+import { mvpApi, type TenantResources } from '../services/mvpApi';
+import type { Extension, PickupGroup } from '../services/mockData';
 
-type PickupGroupValues = Omit<PickupGroup, 'id' | 'tenantId' | 'enabled'>;
-
-const extensionOptions = extensions.map((extension) => ({
-  label: `${extension.number} - ${extension.name}`,
-  value: extension.number,
-}));
+type PickupGroupValues = Omit<PickupGroup, 'id' | 'tenantId' | 'syncStatus'>;
 
 export default function PickupGroups() {
   const [form] = Form.useForm<PickupGroupValues>();
-  const [items, setItems] = useState(pickupGroups);
+  const [items, setItems] = useState<PickupGroup[]>([]);
+  const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [resources, setResources] = useState<TenantResources | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<PickupGroup | null>(null);
+  const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
-  const { hasPermission } = useAuth();
-  const canManage = hasPermission('call-groups.manage');
+  const { activeTenant, hasPermission } = useAuth();
+  const canManage = hasPermission('pbx.configure');
+  const limit = resources?.limits.pickupGroups ?? 0;
+  const used = resources?.usage.pickupGroups ?? items.length;
+  const limitReached = used >= limit;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [groups, nextExtensions, nextResources] = await Promise.all([
+        mvpApi.listPickupGroups(),
+        mvpApi.listExtensions(),
+        mvpApi.tenantResources(),
+      ]);
+      setItems(groups);
+      setExtensions(nextExtensions);
+      setResources(nextResources);
+    } catch (error) {
+      messageApi.error(
+        getApiErrorMessage(
+          error,
+          'Não foi possível carregar os grupos de captura.',
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [messageApi]);
+
+  useEffect(() => {
+    void load();
+  }, [activeTenant?.id, load]);
 
   function openCreate() {
     setEditingGroup(null);
-    form.resetFields();
+    form.setFieldsValue({ enabled: true, members: [] });
     setModalOpen(true);
   }
 
@@ -62,48 +88,49 @@ export default function PickupGroups() {
     setModalOpen(false);
   }
 
-  function createGroup(values: PickupGroupValues) {
-    if (editingGroup) {
-      setItems((current) =>
-        current.map((item) =>
-          item.id === editingGroup.id ? { ...item, ...values } : item,
-        ),
-      );
-      messageApi.success(`Grupo ${values.name} atualizado.`);
+  async function save(values: PickupGroupValues) {
+    try {
+      if (editingGroup) {
+        await mvpApi.updatePickupGroup(editingGroup.id, values);
+      } else {
+        await mvpApi.createPickupGroup(values);
+      }
+      messageApi.success('Grupo enviado para provisionamento.');
       closeModal();
-      return;
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
     }
-
-    setItems((current) => [
-      ...current,
-      {
-        ...values,
-        id: `pickup-${Date.now()}`,
-        tenantId: 'tenant-alcatele',
-        enabled: true,
-      },
-    ]);
-    closeModal();
-    messageApi.success(`Grupo ${values.name} criado.`);
   }
 
-  function removeGroup(group: PickupGroup) {
-    setItems((current) => current.filter((item) => item.id !== group.id));
-    messageApi.success(`Grupo ${group.name} apagado.`);
+  async function removeGroup(group: PickupGroup) {
+    try {
+      await mvpApi.removePickupGroup(group.id);
+      messageApi.success(`Grupo ${group.name} removido.`);
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
+    }
   }
 
-  function toggleGroup(groupId: string, enabled: boolean) {
-    setItems((current) =>
-      current.map((item) =>
-        item.id === groupId ? { ...item, enabled } : item,
-      ),
-    );
+  async function toggleGroup(group: PickupGroup, enabled: boolean) {
+    try {
+      await mvpApi.updatePickupGroup(group.id, { ...group, enabled });
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
+    }
   }
+
+  const extensionOptions = extensions.map((extension) => ({
+    label: `${extension.number} - ${extension.name}`,
+    value: extension.number,
+  }));
 
   const columns: ColumnsType<PickupGroup> = [
     { title: 'Grupo', dataIndex: 'name', key: 'name' },
     {
-      title: 'Codigo de captura',
+      title: 'Código de captura',
       dataIndex: 'code',
       key: 'code',
       render: (code: string) => <Tag color="blue">{code}</Tag>,
@@ -123,6 +150,16 @@ export default function PickupGroups() {
       ),
     },
     {
+      title: 'Sincronização',
+      dataIndex: 'syncStatus',
+      key: 'syncStatus',
+      render: (status: string) => (
+        <Tag color={status === 'synced' ? 'success' : 'warning'}>
+          {status ?? 'pending'}
+        </Tag>
+      ),
+    },
+    {
       title: 'Ativo',
       dataIndex: 'enabled',
       key: 'enabled',
@@ -130,20 +167,19 @@ export default function PickupGroups() {
         <Switch
           checked={enabled}
           disabled={!canManage}
-          onChange={(checked) => toggleGroup(group.id, checked)}
+          onChange={(checked) => void toggleGroup(group, checked)}
         />
       ),
     },
     {
       title: 'Ações',
       key: 'actions',
-      width: 80,
-      render: (_, group) => (
+      width: 100,
+      render: (_, group) =>
         canManage ? (
           <Space>
             <Button
               aria-label={`Editar grupo ${group.name}`}
-              title={`Editar grupo ${group.name}`}
               icon={<EditOutlined />}
               onClick={() => openEdit(group)}
               size="small"
@@ -152,20 +188,13 @@ export default function PickupGroups() {
               cancelText="Cancelar"
               okButtonProps={{ danger: true }}
               okText="Apagar"
-              onConfirm={() => removeGroup(group)}
+              onConfirm={() => void removeGroup(group)}
               title={`Apagar o grupo ${group.name}?`}
             >
-              <Button
-                aria-label={`Apagar grupo ${group.name}`}
-                title={`Apagar grupo ${group.name}`}
-                danger
-                icon={<DeleteOutlined />}
-                size="small"
-              />
+              <Button danger icon={<DeleteOutlined />} size="small" />
             </Popconfirm>
           </Space>
-        ) : null
-      ),
+        ) : null,
     },
   ];
 
@@ -174,22 +203,34 @@ export default function PickupGroups() {
       {contextHolder}
       <PageHeader
         actions={
-          canManage ? (
-            <Button
-              icon={<PlusOutlined />}
-              onClick={openCreate}
-              type="primary"
-            >
-              Novo grupo
-            </Button>
-          ) : null
+          <>
+            <Tag color={limitReached ? 'warning' : 'blue'}>
+              Contratado: {used}/{limit}
+            </Tag>
+            {canManage ? (
+              <Button
+                disabled={limitReached}
+                icon={<PlusOutlined />}
+                onClick={openCreate}
+                type="primary"
+              >
+                Novo grupo
+              </Button>
+            ) : null}
+          </>
         }
         description="Organize ramais que podem capturar chamadas entre si usando um código de facilidade."
         kicker="Captura de chamadas"
         title="Grupos de captura"
       />
       <Card className="soft-panel">
-        <Table columns={columns} dataSource={items} pagination={false} rowKey="id" />
+        <Table
+          columns={columns}
+          dataSource={items}
+          loading={loading}
+          pagination={false}
+          rowKey="id"
+        />
       </Card>
 
       <Modal
@@ -201,7 +242,7 @@ export default function PickupGroups() {
         <Form
           form={form}
           layout="vertical"
-          onFinish={createGroup}
+          onFinish={save}
           requiredMark={false}
         >
           <Form.Item
@@ -212,7 +253,7 @@ export default function PickupGroups() {
             <Input placeholder="Ex.: Comercial" />
           </Form.Item>
           <Form.Item
-            label="Codigo de captura"
+            label="Código de captura"
             name="code"
             rules={[{ required: true, message: 'Informe o código de captura.' }]}
           >
@@ -225,6 +266,9 @@ export default function PickupGroups() {
           >
             <Select mode="multiple" options={extensionOptions} />
           </Form.Item>
+          <Form.Item label="Ativo" name="enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
           <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
             <Button onClick={closeModal}>Cancelar</Button>
             <Button htmlType="submit" type="primary">
@@ -236,4 +280,3 @@ export default function PickupGroups() {
     </>
   );
 }
-

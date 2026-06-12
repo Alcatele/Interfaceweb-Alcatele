@@ -9,7 +9,11 @@ import {
   Post,
 } from '@nestjs/common';
 import {
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
   IsBoolean,
+  IsEmail,
   IsIn,
   IsInt,
   IsOptional,
@@ -93,6 +97,73 @@ class OutboundRouteBody {
   @IsInt()
   @Min(0)
   priority!: number;
+
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+class PickupGroupBody {
+  @IsString()
+  @MinLength(2)
+  name!: string;
+
+  @Matches(/^[0-9A-Za-z*#_.-]{1,32}$/)
+  code!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsString({ each: true })
+  members!: string[];
+
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+class RingGroupBody {
+  @IsString()
+  @MinLength(2)
+  name!: string;
+
+  @Matches(/^[0-9A-Za-z*#_.-]{1,32}$/)
+  number!: string;
+
+  @IsIn(['simultaneous', 'sequential', 'random'])
+  strategy!: 'simultaneous' | 'sequential' | 'random';
+
+  @IsInt()
+  @Min(5)
+  @Max(120)
+  timeout!: number;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsString({ each: true })
+  members!: string[];
+
+  @IsString()
+  @MinLength(1)
+  fallback!: string;
+
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+class VoicemailBoxBody {
+  @Matches(/^[0-9A-Za-z*#_.-]{1,32}$/)
+  mailbox!: string;
+
+  @IsString()
+  @MinLength(2)
+  name!: string;
+
+  @IsOptional()
+  @IsEmail()
+  notificationEmail?: string;
+
+  @IsBoolean()
+  transcriptionEnabled!: boolean;
 
   @IsBoolean()
   enabled!: boolean;
@@ -233,5 +304,104 @@ export class PbxController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.pbxService.removeOutboundRoute(session, id);
+  }
+
+  @Get('pickup-groups')
+  pickupGroups(@CurrentSession() session: SessionContext) {
+    return this.pbxService.listPickupGroups(session);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Post('pickup-groups')
+  createPickupGroup(
+    @CurrentSession() session: SessionContext,
+    @Body() body: PickupGroupBody,
+  ) {
+    return this.pbxService.createPickupGroup(session, body);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Patch('pickup-groups/:id')
+  updatePickupGroup(
+    @CurrentSession() session: SessionContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: PickupGroupBody,
+  ) {
+    return this.pbxService.updatePickupGroup(session, id, body);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Delete('pickup-groups/:id')
+  removePickupGroup(
+    @CurrentSession() session: SessionContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.pbxService.removePickupGroup(session, id);
+  }
+
+  @Get('ring-groups')
+  ringGroups(@CurrentSession() session: SessionContext) {
+    return this.pbxService.listRingGroups(session);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Post('ring-groups')
+  createRingGroup(
+    @CurrentSession() session: SessionContext,
+    @Body() body: RingGroupBody,
+  ) {
+    return this.pbxService.createRingGroup(session, body);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Patch('ring-groups/:id')
+  updateRingGroup(
+    @CurrentSession() session: SessionContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: RingGroupBody,
+  ) {
+    return this.pbxService.updateRingGroup(session, id, body);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Delete('ring-groups/:id')
+  removeRingGroup(
+    @CurrentSession() session: SessionContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.pbxService.removeRingGroup(session, id);
+  }
+
+  @Get('voicemail-boxes')
+  voicemailBoxes(@CurrentSession() session: SessionContext) {
+    return this.pbxService.listVoicemailBoxes(session);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Post('voicemail-boxes')
+  createVoicemailBox(
+    @CurrentSession() session: SessionContext,
+    @Body() body: VoicemailBoxBody,
+  ) {
+    return this.pbxService.createVoicemailBox(session, body);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Patch('voicemail-boxes/:id')
+  updateVoicemailBox(
+    @CurrentSession() session: SessionContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: VoicemailBoxBody,
+  ) {
+    return this.pbxService.updateVoicemailBox(session, id, body);
+  }
+
+  @RequirePermissions('pbx.configure')
+  @Delete('voicemail-boxes/:id')
+  removeVoicemailBox(
+    @CurrentSession() session: SessionContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.pbxService.removeVoicemailBox(session, id);
   }
 }

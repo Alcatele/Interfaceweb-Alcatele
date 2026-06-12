@@ -15,6 +15,9 @@ const resourceTables: Record<string, string> = {
   trunk: 'telephony.sip_trunks',
   inbound_route: 'telephony.inbound_routes',
   outbound_route: 'telephony.outbound_routes',
+  pickup_group: 'telephony.pickup_groups',
+  ring_group: 'telephony.ring_groups',
+  voicemail_box: 'telephony.voicemail_boxes',
 };
 
 @Injectable()

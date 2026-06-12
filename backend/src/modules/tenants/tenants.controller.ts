@@ -8,10 +8,63 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { IsIn, IsString, Matches, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsIn,
+  IsInt,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { CurrentSession, RequirePermissions } from '../auth/auth.decorators';
 import { SessionContext } from '../auth/auth.types';
+import { TenantLimits } from '../database/resource-limits.service';
 import { TenantsService } from './tenants.service';
+
+class TenantLimitsBody implements TenantLimits {
+  @IsInt()
+  @Min(1)
+  @Max(100000)
+  users!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  extensions!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  trunks!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  inboundRoutes!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  outboundRoutes!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  pickupGroups!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  ringGroups!: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(100000)
+  voicemailBoxes!: number;
+}
 
 class CreateTenantBody {
   @IsString()
@@ -23,6 +76,10 @@ class CreateTenantBody {
 
   @Matches(/^[a-z0-9.-]+\.[a-z]{2,}$/)
   domain!: string;
+
+  @ValidateNested()
+  @Type(() => TenantLimitsBody)
+  limits!: TenantLimitsBody;
 }
 
 class TenantStatusBody {
@@ -39,6 +96,11 @@ export class TenantsController {
     return this.tenantsService.list(session);
   }
 
+  @Get('current/resources')
+  resources(@CurrentSession() session: SessionContext) {
+    return this.tenantsService.resources(session);
+  }
+
   @RequirePermissions('tenant.manage')
   @Post()
   create(
@@ -46,6 +108,16 @@ export class TenantsController {
     @Body() body: CreateTenantBody,
   ) {
     return this.tenantsService.create(session, body);
+  }
+
+  @RequirePermissions('tenant.manage')
+  @Patch(':tenantId/limits')
+  updateLimits(
+    @CurrentSession() session: SessionContext,
+    @Param('tenantId', ParseUUIDPipe) tenantId: string,
+    @Body() body: TenantLimitsBody,
+  ) {
+    return this.tenantsService.updateLimits(session, tenantId, body);
   }
 
   @RequirePermissions('tenant.manage')

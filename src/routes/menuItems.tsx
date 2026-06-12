@@ -109,7 +109,7 @@ export const routeItems: RouteItem[] = [
   },
   {
     key: 'ring-groups',
-    label: 'Grupos de toque',
+    label: 'Grupos de chamada',
     path: '/grupos-toque',
     icon: <PhoneOutlined />,
   },

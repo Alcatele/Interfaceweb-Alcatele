@@ -4,8 +4,26 @@ import type {
   Extension,
   InboundRoute,
   OutboundRoute,
+  PickupGroup,
+  RingGroup,
   SipTrunk,
 } from './mockData';
+
+export type TenantLimits = {
+  users: number;
+  extensions: number;
+  trunks: number;
+  inboundRoutes: number;
+  outboundRoutes: number;
+  pickupGroups: number;
+  ringGroups: number;
+  voicemailBoxes: number;
+};
+
+export type TenantResources = {
+  limits: TenantLimits;
+  usage: TenantLimits;
+};
 
 export type SessionTenant = {
   id: string;
@@ -16,6 +34,8 @@ export type SessionTenant = {
   role?: string;
   active?: boolean;
   status?: 'active' | 'suspended' | 'closed';
+  limits?: TenantLimits;
+  usage?: TenantLimits;
 };
 
 export type SessionData = {
@@ -83,6 +103,17 @@ export type WebphoneConfig = {
   sipDomain: string;
 };
 
+export type VoicemailBox = {
+  id: string;
+  tenantId: string;
+  mailbox: string;
+  name: string;
+  notificationEmail: string | null;
+  transcriptionEnabled: boolean;
+  enabled: boolean;
+  syncStatus: 'pending' | 'synced' | 'failed';
+};
+
 const liveMvpApi = {
   async login(identifier: string, password: string, remember: boolean) {
     await api.post('/auth/login', { identifier, password, remember });
@@ -99,8 +130,19 @@ const liveMvpApi = {
   async listTenants() {
     return (await api.get<SessionTenant[]>('/tenants')).data;
   },
-  async createTenant(input: { name: string; slug: string; domain: string }) {
+  async createTenant(input: {
+    name: string;
+    slug: string;
+    domain: string;
+    limits: TenantLimits;
+  }) {
     return (await api.post('/tenants', input)).data;
+  },
+  async tenantResources() {
+    return (await api.get<TenantResources>('/tenants/current/resources')).data;
+  },
+  async updateTenantLimits(tenantId: string, limits: TenantLimits) {
+    return (await api.patch(`/tenants/${tenantId}/limits`, limits)).data;
   },
   async setTenantStatus(
     tenantId: string,
@@ -206,6 +248,51 @@ const liveMvpApi = {
   },
   async removeOutboundRoute(id: string) {
     await api.delete(`/pbx/routes/outbound/${id}`);
+  },
+  async listPickupGroups() {
+    return (await api.get<PickupGroup[]>('/pbx/pickup-groups')).data;
+  },
+  async createPickupGroup(input: Omit<PickupGroup, 'id' | 'tenantId'>) {
+    return (await api.post('/pbx/pickup-groups', input)).data;
+  },
+  async updatePickupGroup(
+    id: string,
+    input: Omit<PickupGroup, 'id' | 'tenantId'>,
+  ) {
+    return (await api.patch(`/pbx/pickup-groups/${id}`, input)).data;
+  },
+  async removePickupGroup(id: string) {
+    await api.delete(`/pbx/pickup-groups/${id}`);
+  },
+  async listRingGroups() {
+    return (await api.get<RingGroup[]>('/pbx/ring-groups')).data;
+  },
+  async createRingGroup(input: Omit<RingGroup, 'id' | 'tenantId'>) {
+    return (await api.post('/pbx/ring-groups', input)).data;
+  },
+  async updateRingGroup(
+    id: string,
+    input: Omit<RingGroup, 'id' | 'tenantId'>,
+  ) {
+    return (await api.patch(`/pbx/ring-groups/${id}`, input)).data;
+  },
+  async removeRingGroup(id: string) {
+    await api.delete(`/pbx/ring-groups/${id}`);
+  },
+  async listVoicemailBoxes() {
+    return (await api.get<VoicemailBox[]>('/pbx/voicemail-boxes')).data;
+  },
+  async createVoicemailBox(input: Omit<VoicemailBox, 'id' | 'tenantId' | 'syncStatus'>) {
+    return (await api.post('/pbx/voicemail-boxes', input)).data;
+  },
+  async updateVoicemailBox(
+    id: string,
+    input: Omit<VoicemailBox, 'id' | 'tenantId' | 'syncStatus'>,
+  ) {
+    return (await api.patch(`/pbx/voicemail-boxes/${id}`, input)).data;
+  },
+  async removeVoicemailBox(id: string) {
+    await api.delete(`/pbx/voicemail-boxes/${id}`);
   },
   async webphoneConfig() {
     return (await api.get<WebphoneConfig>('/webphone/config')).data;

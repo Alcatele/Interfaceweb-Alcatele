@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from 'react';
 import DestinationPicker from '../components/DestinationPicker';
 import PageHeader from '../components/PageHeader';
 import { useAuth } from '../contexts/useAuth';
+import { getApiErrorMessage } from '../services/api';
 import { mvpApi } from '../services/mvpApi';
 import type { InboundRoute } from '../services/mockData';
 
@@ -65,8 +66,10 @@ export default function InboundRoutes() {
       setEditing(null);
       form.resetFields();
       await load();
-    } catch {
-      messageApi.error('Não foi possível salvar a rota.');
+    } catch (error) {
+      messageApi.error(
+        getApiErrorMessage(error, 'Não foi possível salvar a rota.'),
+      );
     }
   }
 

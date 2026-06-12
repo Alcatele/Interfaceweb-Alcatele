@@ -6,9 +6,12 @@ import Dashboard from '../pages/Dashboard';
 import Extensions from '../pages/Extensions';
 import InboundRoutes from '../pages/InboundRoutes';
 import OutboundRoutes from '../pages/OutboundRoutes';
+import PickupGroups from '../pages/PickupGroups';
+import RingGroups from '../pages/RingGroups';
 import Settings from '../pages/Settings';
 import SipTrunks from '../pages/SipTrunks';
 import Tenants from '../pages/Tenants';
+import Voicemail from '../pages/Voicemail';
 import Webphone from '../pages/Webphone';
 import type { RouteKey } from '../services/accessControl';
 
@@ -33,6 +36,18 @@ export default function AppRoutes() {
       <Route
         path="/rotas-entrada"
         element={protect('inbound-routes', <InboundRoutes />)}
+      />
+      <Route
+        path="/grupos-captura"
+        element={protect('pickup-groups', <PickupGroups />)}
+      />
+      <Route
+        path="/grupos-toque"
+        element={protect('ring-groups', <RingGroups />)}
+      />
+      <Route
+        path="/correio-voz"
+        element={protect('voicemail', <Voicemail />)}
       />
       <Route path="/webphone" element={protect('webphone', <Webphone />)} />
       <Route

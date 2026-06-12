@@ -1,4 +1,4 @@
-﻿import {
+import {
   DeleteOutlined,
   EditOutlined,
   PhoneOutlined,
@@ -20,37 +20,72 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import DestinationPicker from '../components/DestinationPicker';
 import PageHeader from '../components/PageHeader';
 import { useAuth } from '../contexts/useAuth';
-import { extensions, ringGroups, type RingGroup } from '../services/mockData';
+import { getApiErrorMessage } from '../services/api';
+import { mvpApi, type TenantResources } from '../services/mvpApi';
+import type { Extension, RingGroup } from '../services/mockData';
 
-type RingGroupValues = Omit<RingGroup, 'id' | 'tenantId' | 'enabled'>;
-
-const extensionOptions = extensions.map((extension) => ({
-  label: `${extension.number} - ${extension.name}`,
-  value: extension.number,
-}));
+type RingGroupValues = Omit<RingGroup, 'id' | 'tenantId' | 'syncStatus'>;
 
 const strategyLabels: Record<RingGroup['strategy'], string> = {
   simultaneous: 'Tocar todos',
   sequential: 'Sequencial',
-  random: 'Aleatorio',
+  random: 'Aleatório',
 };
 
 export default function RingGroups() {
   const [form] = Form.useForm<RingGroupValues>();
-  const [items, setItems] = useState(ringGroups);
+  const [items, setItems] = useState<RingGroup[]>([]);
+  const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [resources, setResources] = useState<TenantResources | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<RingGroup | null>(null);
+  const [loading, setLoading] = useState(true);
   const [messageApi, contextHolder] = message.useMessage();
-  const { hasPermission } = useAuth();
-  const canManage = hasPermission('call-groups.manage');
+  const { activeTenant, hasPermission } = useAuth();
+  const canManage = hasPermission('pbx.configure');
+  const limit = resources?.limits.ringGroups ?? 0;
+  const used = resources?.usage.ringGroups ?? items.length;
+  const limitReached = used >= limit;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [groups, nextExtensions, nextResources] = await Promise.all([
+        mvpApi.listRingGroups(),
+        mvpApi.listExtensions(),
+        mvpApi.tenantResources(),
+      ]);
+      setItems(groups);
+      setExtensions(nextExtensions);
+      setResources(nextResources);
+    } catch (error) {
+      messageApi.error(
+        getApiErrorMessage(
+          error,
+          'Não foi possível carregar os grupos de chamada.',
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [messageApi]);
+
+  useEffect(() => {
+    void load();
+  }, [activeTenant?.id, load]);
 
   function openCreate() {
     setEditingGroup(null);
-    form.setFieldsValue({ strategy: 'simultaneous', timeout: 25 });
+    form.setFieldsValue({
+      strategy: 'simultaneous',
+      timeout: 25,
+      enabled: true,
+      members: [],
+    });
     setModalOpen(true);
   }
 
@@ -66,54 +101,55 @@ export default function RingGroups() {
     setModalOpen(false);
   }
 
-  function createGroup(values: RingGroupValues) {
-    if (editingGroup) {
-      setItems((current) =>
-        current.map((item) =>
-          item.id === editingGroup.id ? { ...item, ...values } : item,
-        ),
-      );
-      messageApi.success(`Grupo ${values.name} atualizado.`);
+  async function save(values: RingGroupValues) {
+    try {
+      if (editingGroup) {
+        await mvpApi.updateRingGroup(editingGroup.id, values);
+      } else {
+        await mvpApi.createRingGroup(values);
+      }
+      messageApi.success('Grupo enviado para provisionamento.');
       closeModal();
-      return;
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
     }
-
-    setItems((current) => [
-      ...current,
-      {
-        ...values,
-        id: `ring-${Date.now()}`,
-        tenantId: 'tenant-alcatele',
-        enabled: true,
-      },
-    ]);
-    closeModal();
-    messageApi.success(`Grupo ${values.name} criado.`);
   }
 
-  function removeGroup(group: RingGroup) {
-    setItems((current) => current.filter((item) => item.id !== group.id));
-    messageApi.success(`Grupo ${group.name} apagado.`);
+  async function removeGroup(group: RingGroup) {
+    try {
+      await mvpApi.removeRingGroup(group.id);
+      messageApi.success(`Grupo ${group.name} removido.`);
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
+    }
   }
 
-  function toggleGroup(groupId: string, enabled: boolean) {
-    setItems((current) =>
-      current.map((item) =>
-        item.id === groupId ? { ...item, enabled } : item,
-      ),
-    );
+  async function toggleGroup(group: RingGroup, enabled: boolean) {
+    try {
+      await mvpApi.updateRingGroup(group.id, { ...group, enabled });
+      await load();
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error));
+    }
   }
+
+  const extensionOptions = extensions.map((extension) => ({
+    label: `${extension.number} - ${extension.name}`,
+    value: extension.number,
+  }));
 
   const columns: ColumnsType<RingGroup> = [
     { title: 'Grupo', dataIndex: 'name', key: 'name' },
     {
-      title: 'Numero',
+      title: 'Número',
       dataIndex: 'number',
       key: 'number',
       render: (number: string) => <Tag color="blue">{number}</Tag>,
     },
     {
-      title: 'Estrategia',
+      title: 'Estratégia',
       dataIndex: 'strategy',
       key: 'strategy',
       render: (strategy: RingGroup['strategy']) => strategyLabels[strategy],
@@ -140,6 +176,16 @@ export default function RingGroups() {
     },
     { title: 'Destino sem resposta', dataIndex: 'fallback', key: 'fallback' },
     {
+      title: 'Sincronização',
+      dataIndex: 'syncStatus',
+      key: 'syncStatus',
+      render: (status: string) => (
+        <Tag color={status === 'synced' ? 'success' : 'warning'}>
+          {status ?? 'pending'}
+        </Tag>
+      ),
+    },
+    {
       title: 'Ativo',
       dataIndex: 'enabled',
       key: 'enabled',
@@ -147,20 +193,19 @@ export default function RingGroups() {
         <Switch
           checked={enabled}
           disabled={!canManage}
-          onChange={(checked) => toggleGroup(group.id, checked)}
+          onChange={(checked) => void toggleGroup(group, checked)}
         />
       ),
     },
     {
       title: 'Ações',
       key: 'actions',
-      width: 80,
-      render: (_, group) => (
+      width: 100,
+      render: (_, group) =>
         canManage ? (
           <Space>
             <Button
               aria-label={`Editar grupo ${group.name}`}
-              title={`Editar grupo ${group.name}`}
               icon={<EditOutlined />}
               onClick={() => openEdit(group)}
               size="small"
@@ -169,20 +214,13 @@ export default function RingGroups() {
               cancelText="Cancelar"
               okButtonProps={{ danger: true }}
               okText="Apagar"
-              onConfirm={() => removeGroup(group)}
+              onConfirm={() => void removeGroup(group)}
               title={`Apagar o grupo ${group.name}?`}
             >
-              <Button
-                aria-label={`Apagar grupo ${group.name}`}
-                title={`Apagar grupo ${group.name}`}
-                danger
-                icon={<DeleteOutlined />}
-                size="small"
-              />
+              <Button danger icon={<DeleteOutlined />} size="small" />
             </Popconfirm>
           </Space>
-        ) : null
-      ),
+        ) : null,
     },
   ];
 
@@ -191,27 +229,34 @@ export default function RingGroups() {
       {contextHolder}
       <PageHeader
         actions={
-          canManage ? (
-            <Button
-              icon={<PlusOutlined />}
-              onClick={openCreate}
-              type="primary"
-            >
-              Novo grupo
-            </Button>
-          ) : null
+          <>
+            <Tag color={limitReached ? 'warning' : 'blue'}>
+              Contratado: {used}/{limit}
+            </Tag>
+            {canManage ? (
+              <Button
+                disabled={limitReached}
+                icon={<PlusOutlined />}
+                onClick={openCreate}
+                type="primary"
+              >
+                Novo grupo
+              </Button>
+            ) : null}
+          </>
         }
         description="Distribua chamadas entre vários ramais e defina estratégia, tempo de toque e destino alternativo."
         kicker="Distribuição de chamadas"
-        title="Grupos de toque"
+        title="Grupos de chamada"
       />
       <Card className="soft-panel">
         <Table
           columns={columns}
           dataSource={items}
+          loading={loading}
           pagination={false}
           rowKey="id"
-          scroll={{ x: 1050 }}
+          scroll={{ x: 1180 }}
         />
       </Card>
 
@@ -219,13 +264,12 @@ export default function RingGroups() {
         footer={null}
         onCancel={closeModal}
         open={modalOpen}
-        title={editingGroup ? 'Editar grupo de toque' : 'Novo grupo de toque'}
+        title={editingGroup ? 'Editar grupo de chamada' : 'Novo grupo de chamada'}
       >
         <Form
           form={form}
-          initialValues={{ strategy: 'simultaneous', timeout: 25 }}
           layout="vertical"
-          onFinish={createGroup}
+          onFinish={save}
           requiredMark={false}
         >
           <Space align="start" size={12} style={{ width: '100%' }}>
@@ -235,10 +279,10 @@ export default function RingGroups() {
               rules={[{ required: true, message: 'Informe o nome.' }]}
               style={{ flex: 1 }}
             >
-              <Input placeholder="Ex.: Recepcao" />
+              <Input placeholder="Ex.: Recepção" />
             </Form.Item>
             <Form.Item
-              label="Numero"
+              label="Número"
               name="number"
               rules={[{ required: true, message: 'Informe o número.' }]}
               style={{ width: 130 }}
@@ -247,7 +291,7 @@ export default function RingGroups() {
             </Form.Item>
           </Space>
           <Form.Item
-            label="Estrategia de toque"
+            label="Estratégia de toque"
             name="strategy"
             rules={[{ required: true }]}
           >
@@ -255,7 +299,7 @@ export default function RingGroups() {
               options={[
                 { label: 'Tocar todos', value: 'simultaneous' },
                 { label: 'Sequencial', value: 'sequential' },
-                { label: 'Aleatorio', value: 'random' },
+                { label: 'Aleatório', value: 'random' },
               ]}
             />
           </Form.Item>
@@ -271,7 +315,12 @@ export default function RingGroups() {
             name="timeout"
             rules={[{ required: true }]}
           >
-            <InputNumber addonAfter="segundos" min={5} max={120} style={{ width: '100%' }} />
+            <InputNumber
+              addonAfter="segundos"
+              min={5}
+              max={120}
+              style={{ width: '100%' }}
+            />
           </Form.Item>
           <Form.Item
             label="Destino quando não atendido"
@@ -279,6 +328,9 @@ export default function RingGroups() {
             rules={[{ required: true, message: 'Informe o destino alternativo.' }]}
           >
             <DestinationPicker />
+          </Form.Item>
+          <Form.Item label="Ativo" name="enabled" valuePropName="checked">
+            <Switch />
           </Form.Item>
           <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
             <Button onClick={closeModal}>Cancelar</Button>
@@ -291,4 +343,3 @@ export default function RingGroups() {
     </>
   );
 }
-

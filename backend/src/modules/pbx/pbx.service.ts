@@ -1,13 +1,29 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { SessionContext } from '../auth/auth.types';
 import { DatabaseService } from '../database/database.service';
+import { ResourceLimitsService } from '../database/resource-limits.service';
 
-type ResourceType = 'extension' | 'trunk' | 'inbound_route' | 'outbound_route';
+type ResourceType =
+  | 'extension'
+  | 'trunk'
+  | 'inbound_route'
+  | 'outbound_route'
+  | 'pickup_group'
+  | 'ring_group'
+  | 'voicemail_box';
 
 @Injectable()
 export class PbxService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly resourceLimits: ResourceLimitsService,
+  ) {}
 
   listExtensions(session: SessionContext) {
     return this.inTenant(session, async (client) => {
@@ -45,6 +61,11 @@ export class PbxService {
     },
   ) {
     return this.mutate(session, async (client) => {
+      await this.resourceLimits.assertAvailable(
+        client,
+        session.tenant.id,
+        'extensions',
+      );
       const result = await client.query(
         `INSERT INTO telephony.extensions AS e (
            tenant_id,
@@ -90,6 +111,11 @@ export class PbxService {
     },
   ) {
     return this.mutate(session, async (client) => {
+      await this.resourceLimits.assertAvailable(
+        client,
+        session.tenant.id,
+        'trunks',
+      );
       const result = await client.query(
         `UPDATE telephony.extensions AS e
          SET extension_number = $3,
@@ -159,6 +185,11 @@ export class PbxService {
     },
   ) {
     return this.mutate(session, async (client) => {
+      await this.resourceLimits.assertAvailable(
+        client,
+        session.tenant.id,
+        'inboundRoutes',
+      );
       const result = await client.query(
         `INSERT INTO telephony.sip_trunks AS t (
            tenant_id, name, provider, host, max_channels, status, sync_status
@@ -197,6 +228,11 @@ export class PbxService {
     },
   ) {
     return this.mutate(session, async (client) => {
+      await this.resourceLimits.assertAvailable(
+        client,
+        session.tenant.id,
+        'outboundRoutes',
+      );
       const result = await client.query(
         `UPDATE telephony.sip_trunks AS t
          SET name = $3,
@@ -434,6 +470,384 @@ export class PbxService {
     );
   }
 
+  listPickupGroups(session: SessionContext) {
+    return this.inTenant(session, async (client) => {
+      const result = await client.query(
+        `SELECT
+           id,
+           tenant_id AS "tenantId",
+           name,
+           feature_code AS code,
+           members,
+           enabled,
+           sync_status AS "syncStatus"
+         FROM telephony.pickup_groups
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+         ORDER BY name`,
+        [session.tenant.id],
+      );
+      return result.rows;
+    });
+  }
+
+  createPickupGroup(
+    session: SessionContext,
+    input: {
+      name: string;
+      code: string;
+      members: string[];
+      enabled: boolean;
+    },
+  ) {
+    return this.mutate(session, async (client) => {
+      await this.resourceLimits.assertAvailable(
+        client,
+        session.tenant.id,
+        'pickupGroups',
+      );
+      await this.ensureExtensions(client, session.tenant.id, input.members);
+      const result = await client.query(
+        `INSERT INTO telephony.pickup_groups AS group_resource (
+           tenant_id, name, feature_code, members, enabled, sync_status
+         )
+         VALUES ($1, $2, $3, $4, $5, 'pending')
+         RETURNING group_resource.id, to_jsonb(group_resource) AS state`,
+        [
+          session.tenant.id,
+          input.name.trim(),
+          input.code.trim(),
+          input.members,
+          input.enabled,
+        ],
+      );
+      await this.enqueue(
+        client,
+        session.tenant.id,
+        'pickup_group',
+        result.rows[0].id as string,
+        'create',
+        result.rows[0].state as Record<string, unknown>,
+      );
+      return result.rows[0];
+    });
+  }
+
+  updatePickupGroup(
+    session: SessionContext,
+    resourceId: string,
+    input: {
+      name: string;
+      code: string;
+      members: string[];
+      enabled: boolean;
+    },
+  ) {
+    return this.mutate(session, async (client) => {
+      await this.ensureExtensions(client, session.tenant.id, input.members);
+      const result = await client.query(
+        `UPDATE telephony.pickup_groups AS group_resource
+         SET name = $3,
+             feature_code = $4,
+             members = $5,
+             enabled = $6,
+             sync_status = 'pending'
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+         RETURNING group_resource.id, to_jsonb(group_resource) AS state`,
+        [
+          session.tenant.id,
+          resourceId,
+          input.name.trim(),
+          input.code.trim(),
+          input.members,
+          input.enabled,
+        ],
+      );
+      this.ensureFound(result.rows[0]);
+      await this.enqueue(
+        client,
+        session.tenant.id,
+        'pickup_group',
+        resourceId,
+        'update',
+        result.rows[0].state as Record<string, unknown>,
+      );
+      return result.rows[0];
+    });
+  }
+
+  removePickupGroup(session: SessionContext, resourceId: string) {
+    return this.softDelete(
+      session,
+      'telephony.pickup_groups',
+      'pickup_group',
+      resourceId,
+    );
+  }
+
+  listRingGroups(session: SessionContext) {
+    return this.inTenant(session, async (client) => {
+      const result = await client.query(
+        `SELECT
+           id,
+           tenant_id AS "tenantId",
+           name,
+           group_number AS number,
+           strategy,
+           timeout_seconds AS timeout,
+           members,
+           fallback,
+           enabled,
+           sync_status AS "syncStatus"
+         FROM telephony.ring_groups
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+         ORDER BY name`,
+        [session.tenant.id],
+      );
+      return result.rows;
+    });
+  }
+
+  createRingGroup(
+    session: SessionContext,
+    input: {
+      name: string;
+      number: string;
+      strategy: 'simultaneous' | 'sequential' | 'random';
+      timeout: number;
+      members: string[];
+      fallback: string;
+      enabled: boolean;
+    },
+  ) {
+    return this.mutate(session, async (client) => {
+      await this.resourceLimits.assertAvailable(
+        client,
+        session.tenant.id,
+        'ringGroups',
+      );
+      await this.ensureExtensions(client, session.tenant.id, input.members);
+      const result = await client.query(
+        `INSERT INTO telephony.ring_groups AS group_resource (
+           tenant_id,
+           name,
+           group_number,
+           strategy,
+           timeout_seconds,
+           members,
+           fallback,
+           enabled,
+           sync_status
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
+         RETURNING group_resource.id, to_jsonb(group_resource) AS state`,
+        [
+          session.tenant.id,
+          input.name.trim(),
+          input.number.trim(),
+          input.strategy,
+          input.timeout,
+          input.members,
+          input.fallback.trim(),
+          input.enabled,
+        ],
+      );
+      await this.enqueue(
+        client,
+        session.tenant.id,
+        'ring_group',
+        result.rows[0].id as string,
+        'create',
+        result.rows[0].state as Record<string, unknown>,
+      );
+      return result.rows[0];
+    });
+  }
+
+  updateRingGroup(
+    session: SessionContext,
+    resourceId: string,
+    input: {
+      name: string;
+      number: string;
+      strategy: 'simultaneous' | 'sequential' | 'random';
+      timeout: number;
+      members: string[];
+      fallback: string;
+      enabled: boolean;
+    },
+  ) {
+    return this.mutate(session, async (client) => {
+      await this.ensureExtensions(client, session.tenant.id, input.members);
+      const result = await client.query(
+        `UPDATE telephony.ring_groups AS group_resource
+         SET name = $3,
+             group_number = $4,
+             strategy = $5,
+             timeout_seconds = $6,
+             members = $7,
+             fallback = $8,
+             enabled = $9,
+             sync_status = 'pending'
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+         RETURNING group_resource.id, to_jsonb(group_resource) AS state`,
+        [
+          session.tenant.id,
+          resourceId,
+          input.name.trim(),
+          input.number.trim(),
+          input.strategy,
+          input.timeout,
+          input.members,
+          input.fallback.trim(),
+          input.enabled,
+        ],
+      );
+      this.ensureFound(result.rows[0]);
+      await this.enqueue(
+        client,
+        session.tenant.id,
+        'ring_group',
+        resourceId,
+        'update',
+        result.rows[0].state as Record<string, unknown>,
+      );
+      return result.rows[0];
+    });
+  }
+
+  removeRingGroup(session: SessionContext, resourceId: string) {
+    return this.softDelete(
+      session,
+      'telephony.ring_groups',
+      'ring_group',
+      resourceId,
+    );
+  }
+
+  listVoicemailBoxes(session: SessionContext) {
+    return this.inTenant(session, async (client) => {
+      const result = await client.query(
+        `SELECT
+           id,
+           tenant_id AS "tenantId",
+           mailbox,
+           display_name AS name,
+           notification_email AS "notificationEmail",
+           transcription_enabled AS "transcriptionEnabled",
+           enabled,
+           sync_status AS "syncStatus"
+         FROM telephony.voicemail_boxes
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+         ORDER BY mailbox`,
+        [session.tenant.id],
+      );
+      return result.rows;
+    });
+  }
+
+  createVoicemailBox(
+    session: SessionContext,
+    input: {
+      mailbox: string;
+      name: string;
+      notificationEmail?: string;
+      transcriptionEnabled: boolean;
+      enabled: boolean;
+    },
+  ) {
+    return this.mutate(session, async (client) => {
+      await this.resourceLimits.assertAvailable(
+        client,
+        session.tenant.id,
+        'voicemailBoxes',
+      );
+      const result = await client.query(
+        `INSERT INTO telephony.voicemail_boxes AS mailbox_resource (
+           tenant_id,
+           mailbox,
+           display_name,
+           notification_email,
+           transcription_enabled,
+           enabled,
+           sync_status
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+         RETURNING mailbox_resource.id, to_jsonb(mailbox_resource) AS state`,
+        [
+          session.tenant.id,
+          input.mailbox.trim(),
+          input.name.trim(),
+          input.notificationEmail?.trim() || null,
+          input.transcriptionEnabled,
+          input.enabled,
+        ],
+      );
+      await this.enqueue(
+        client,
+        session.tenant.id,
+        'voicemail_box',
+        result.rows[0].id as string,
+        'create',
+        result.rows[0].state as Record<string, unknown>,
+      );
+      return result.rows[0];
+    });
+  }
+
+  updateVoicemailBox(
+    session: SessionContext,
+    resourceId: string,
+    input: {
+      mailbox: string;
+      name: string;
+      notificationEmail?: string;
+      transcriptionEnabled: boolean;
+      enabled: boolean;
+    },
+  ) {
+    return this.mutate(session, async (client) => {
+      const result = await client.query(
+        `UPDATE telephony.voicemail_boxes AS mailbox_resource
+         SET mailbox = $3,
+             display_name = $4,
+             notification_email = $5,
+             transcription_enabled = $6,
+             enabled = $7,
+             sync_status = 'pending'
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+         RETURNING mailbox_resource.id, to_jsonb(mailbox_resource) AS state`,
+        [
+          session.tenant.id,
+          resourceId,
+          input.mailbox.trim(),
+          input.name.trim(),
+          input.notificationEmail?.trim() || null,
+          input.transcriptionEnabled,
+          input.enabled,
+        ],
+      );
+      this.ensureFound(result.rows[0]);
+      await this.enqueue(
+        client,
+        session.tenant.id,
+        'voicemail_box',
+        resourceId,
+        'update',
+        result.rows[0].state as Record<string, unknown>,
+      );
+      return result.rows[0];
+    });
+  }
+
+  removeVoicemailBox(session: SessionContext, resourceId: string) {
+    return this.softDelete(
+      session,
+      'telephony.voicemail_boxes',
+      'voicemail_box',
+      resourceId,
+    );
+  }
+
   private inTenant<T>(
     session: SessionContext,
     callback: (client: PoolClient) => Promise<T>,
@@ -551,6 +965,27 @@ export class PbxService {
   private ensureFound(value: unknown) {
     if (!value) {
       throw new NotFoundException('Recurso não encontrado.');
+    }
+  }
+
+  private async ensureExtensions(
+    client: PoolClient,
+    tenantId: string,
+    members: string[],
+  ) {
+    const result = await client.query<{ total: number }>(
+      `SELECT count(DISTINCT extension_number)::int AS total
+       FROM telephony.extensions
+       WHERE tenant_id = $1
+         AND deleted_at IS NULL
+         AND extension_number = ANY($2::varchar[])`,
+      [tenantId, members],
+    );
+
+    if (Number(result.rows[0]?.total ?? 0) !== members.length) {
+      throw new BadRequestException(
+        'Um ou mais ramais selecionados não pertencem à empresa ativa.',
+      );
     }
   }
 }
